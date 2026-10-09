@@ -11,7 +11,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -49,81 +51,42 @@ fun AniRecapStudioApp(
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
+                tonalElevation = 2.dp,
                 modifier = Modifier
                     .navigationBarsPadding()
                     .testTag("studio_bottom_nav")
             ) {
-                // Page 1: Home (Upload & Analyze)
-                NavigationBarItem(
+                // Three equal destinations: icon + one short, single-line label.
+                StudioNavDestination(
+                    label = if (isKhmer) "បញ្ចូល" else "Upload",
+                    icon = Icons.Default.UploadFile,
                     selected = currentScreen is StudioNavScreen.HomeUpload,
-                    onClick = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) },
-                    icon = { Icon(Icons.Default.UploadFile, contentDescription = "Home Page") },
-                    label = {
-                        Text(
-                            text = if (isKhmer) "ទំព័រដើម (Upload)" else "Home (Upload)",
-                            fontSize = 10.sp
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = CrimsonRedBright,
-                        selectedTextColor = CrimsonRedBright,
-                        indicatorColor = CrimsonRedBright.copy(alpha = 0.18f),
-                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("nav_home_upload")
+                    testTag = "nav_home_upload",
+                    onClick = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) }
                 )
-
-                // Page 2: Monitor & Results (Script & CapCut Guide)
-                NavigationBarItem(
+                StudioNavDestination(
+                    label = if (isKhmer) "ត្រួតពិនិត្យ" else "Monitor",
+                    icon = Icons.Default.SlowMotionVideo,
                     selected = currentScreen is StudioNavScreen.Page2Preview,
-                    onClick = { studioViewModel.navigateTo(StudioNavScreen.Page2Preview) },
-                    icon = { Icon(Icons.Default.SlowMotionVideo, contentDescription = "Page 2 Monitor") },
-                    label = {
-                        Text(
-                            text = if (isKhmer) "Page 2 (Monitor & Guide)" else "Page 2 (Monitor)",
-                            fontSize = 10.sp
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = CrimsonRedBright,
-                        selectedTextColor = CrimsonRedBright,
-                        indicatorColor = CrimsonRedBright.copy(alpha = 0.18f),
-                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("nav_page2_preview")
+                    testTag = "nav_page2_preview",
+                    onClick = { studioViewModel.navigateTo(StudioNavScreen.Page2Preview) }
                 )
-
-                // Page 3: Settings
-                NavigationBarItem(
+                StudioNavDestination(
+                    label = if (isKhmer) "ការកំណត់" else "Settings",
+                    icon = Icons.Default.Settings,
                     selected = currentScreen is StudioNavScreen.Settings,
-                    onClick = { studioViewModel.navigateTo(StudioNavScreen.Settings) },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = {
-                        Text(
-                            text = if (isKhmer) "ការកំណត់ (Settings)" else "Settings",
-                            fontSize = 10.sp
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = CrimsonRedBright,
-                        selectedTextColor = CrimsonRedBright,
-                        indicatorColor = CrimsonRedBright.copy(alpha = 0.18f),
-                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("nav_settings")
+                    testTag = "nav_settings",
+                    onClick = { studioViewModel.navigateTo(StudioNavScreen.Settings) }
                 )
             }
         }
     ) { innerPadding ->
+        // Scaffold already resolves the system-bar insets into innerPadding, so the
+        // pages are not padded twice at the top.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding()
         ) {
             when (currentScreen) {
                 is StudioNavScreen.HomeUpload -> {
@@ -138,4 +101,43 @@ fun AniRecapStudioApp(
             }
         }
     }
+}
+
+/**
+ * One bottom-navigation destination. Labels are short and always render on a
+ * single line so the three items stay visually equal, and only the selected
+ * item carries the accent colour.
+ */
+@Composable
+private fun RowScope.StudioNavDestination(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    NavigationBarItem(
+        selected = selected,
+        onClick = onClick,
+        icon = { Icon(icon, contentDescription = label) },
+        label = {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        alwaysShowLabel = true,
+        colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = CrimsonRedBright,
+            selectedTextColor = CrimsonRedBright,
+            indicatorColor = CrimsonRedBright.copy(alpha = 0.14f),
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ),
+        modifier = Modifier.testTag(testTag)
+    )
 }
