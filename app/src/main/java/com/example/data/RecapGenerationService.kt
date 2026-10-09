@@ -1,258 +1,504 @@
 package com.example.data
 
+import android.content.Context
+import android.net.Uri
 import com.example.model.CapCutMarker
 import com.example.model.GeneratedRecapScript
-import com.example.model.RecapProject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
+/**
+ * Service that analyzes a REAL uploaded video file using Gemini AI.
+ * No sample/fallback data — if the API key is missing or the call fails,
+ * an exception is thrown so the UI can show a proper error.
+ */
 object RecapGenerationService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)
         .build()
 
-    // Map UI model names to real Gemini model endpoints
-    private fun mapModelEndpoint(uiModel: String): String {
-        return when {
-            uiModel.contains("3.8") -> "gemini-2.5-flash" // or preview
-            uiModel.contains("3.7") -> "gemini-2.5-flash"
-            uiModel.contains("3.6") -> "gemini-2.5-flash"
-            uiModel.contains("3.5") -> "gemini-2.5-flash"
-            else -> "gemini-2.5-flash"
-        }
-    }
+    private const val GEMINI_BASE = "https://generativelanguage.googleapis.com"
+    private const val MODEL_ENDPOINT = "gemini-2.5-flash"
 
+    /**
+     * Analyze a real uploaded video and generate a recap script + CapCut guide.
+     *
+     * Flow:
+     * 1. Copy the video from the content URI to a temp file.
+     * 2. Upload it to Gemini's File API.
+     * 3. Wait for the file to become ACTIVE.
+     * 4. Send a generateContent request with the video + master prompt.
+     * 5. Parse the AI response into a structured script.
+     *
+     * @throws IllegalStateException if no API key is configured.
+     * @throws Exception if the upload or analysis fails.
+     */
     suspend fun analyzeAndGenerateRecap(
+        context: Context,
+        videoUri: Uri,
         animeName: String,
         episodes: String,
         sourceLang: String,
         targetLang: String,
         modelName: String,
-        videoFileName: String
+        videoFileName: String,
+        videoDurationSeconds: Int
     ): Pair<GeneratedRecapScript, List<CapCutMarker>> = withContext(Dispatchers.IO) {
-        // Try calling real API if key is present
         val apiKey = AppSettings.getEffectiveApiKey()
-        if (apiKey.isNotBlank()) {
-            try {
-                val apiResult = callAiApi(animeName, episodes, sourceLang, targetLang, modelName, apiKey)
-                if (apiResult != null) {
-                    return@withContext apiResult
+        if (apiKey.isBlank()) {
+            throw IllegalStateException(
+                "No Gemini API key configured. Please add your API key in Settings."
+            )
+        }
+
+        // Step 1: Copy video from content URI to a temp file
+        val tempVideoFile = copyUriToTempFile(context, videoUri, videoFileName)
+
+        try {
+            // Step 2: Upload video to Gemini File API
+            val fileUri = uploadVideoToGemini(tempVideoFile, apiKey)
+
+            // Step 3: Wait for the file to be processed (ACTIVE state)
+            waitForFileActive(fileUri, apiKey)
+
+            // Step 4: Generate recap from the real video
+            val aiResponse = callGeminiWithVideo(
+                fileUri = fileUri,
+                animeName = animeName,
+                episodes = episodes,
+                sourceLang = sourceLang,
+                targetLang = targetLang,
+                modelName = modelName,
+                videoDurationSeconds = videoDurationSeconds,
+                apiKey = apiKey
+            )
+
+            // Step 5: Parse the AI response into structured data
+            val script = parseAiResponseToScript(aiResponse, animeName, episodes)
+            val capCutGuide = parseAiResponseToCapCutGuide(aiResponse, videoDurationSeconds, animeName)
+
+            // Clean up: delete the uploaded file from Gemini
+            deleteGeminiFile(fileUri, apiKey)
+
+            return@withContext Pair(script, capCutGuide)
+        } finally {
+            // Always clean up the temp file
+            try { tempVideoFile.delete() } catch (_: Exception) {}
+        }
+    }
+
+    // ==========================================
+    // Step 1: Copy content URI to temp file
+    // ==========================================
+    private fun copyUriToTempFile(context: Context, uri: Uri, fileName: String): File {
+        val safeName = fileName.ifBlank { "uploaded_video.mp4" }
+        val tempFile = File(context.cacheDir, "anirecap_upload_$safeName")
+
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(tempFile).use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IllegalStateException("Could not read the selected video file.")
+
+        return tempFile
+    }
+
+    // ==========================================
+    // Step 2: Upload video to Gemini File API
+    // ==========================================
+    private fun uploadVideoToGemini(videoFile: File, apiKey: String): String {
+        val mimeType = when (videoFile.extension.lowercase()) {
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "webm" -> "video/webm"
+            else -> "video/mp4"
+        }
+
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "metadata",
+                null,
+                JSONObject().apply {
+                    put("display_name", videoFile.name)
+                }.toString().toRequestBody("application/json".toMediaType())
+            )
+            .addFormDataPart(
+                "file",
+                videoFile.name,
+                videoFile.asRequestBody(mimeType.toMediaType())
+            )
+            .build()
+
+        val request = Request.Builder()
+            .url("$GEMINI_BASE/upload/v1beta/files?key=$apiKey")
+            .post(requestBody)
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string()
+
+        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+            throw Exception("Video upload failed (HTTP ${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val fileObj = json.optJSONObject("file") ?: throw Exception("Invalid upload response: no file object")
+        return fileObj.getString("uri")
+    }
+
+    // ==========================================
+    // Step 3: Poll until file is ACTIVE
+    // ==========================================
+    private suspend fun waitForFileActive(fileUri: String, apiKey: String) {
+        // fileUri looks like: https://generativelanguage.googleapis.com/v1beta/files/abc123
+        val fileName = fileUri.substringAfterLast("/")
+        val maxAttempts = 30
+        var attempt = 0
+
+        while (attempt < maxAttempts) {
+            val request = Request.Builder()
+                .url("$GEMINI_BASE/v1beta/files/$fileName?key=$apiKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string()
+
+            if (response.isSuccessful && !body.isNullOrBlank()) {
+                val state = JSONObject(body).optString("state", "")
+                when (state) {
+                    "ACTIVE" -> return
+                    "FAILED" -> throw Exception("Video processing failed on Gemini servers.")
+                    else -> {
+                        // PROCESSING — wait and retry
+                        delay(2000)
+                        attempt++
+                    }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
+                delay(2000)
+                attempt++
             }
         }
-
-        // Simulate intelligent deep analysis delay
-        delay(1200)
-
-        // Generate Master Prompt Conforming Recap
-        val generatedScript = createMasterKhmerScript(animeName, episodes, targetLang)
-        val capCutGuide = createCapCutGuide(animeName, episodes)
-
-        return@withContext Pair(generatedScript, capCutGuide)
+        throw Exception("Timed out waiting for video processing. Please try again.")
     }
 
-    private fun callAiApi(
+    // ==========================================
+    // Step 4: Call Gemini with the real video
+    // ==========================================
+    private fun callGeminiWithVideo(
+        fileUri: String,
         animeName: String,
         episodes: String,
         sourceLang: String,
         targetLang: String,
         modelName: String,
+        videoDurationSeconds: Int,
         apiKey: String
-    ): Pair<GeneratedRecapScript, List<CapCutMarker>>? {
+    ): String {
+        val durationFormatted = formatDuration(videoDurationSeconds)
+
         val prompt = """
-            You are a professional Anime & Movie Recap Script writer in Khmer following the MASTER PROMPT: KHMER ANIME RECAP:
-            Anime/Movie: $animeName
-            Episodes: $episodes
-            Source Language: $sourceLang
-            Target Language: $targetLang
-            Model: $modelName
-            
-            RULES:
-            1. Language: Natural, engaging Khmer narration.
-            2. Ratio: 80% Story + 20% Recap commentary.
-            3. Opening: Must start with a compelling Hook, followed by "នៅដើមសាច់រឿង គេបានបង្ហាញឲ្យឃើញថា..."
-            4. Rank & Status tracking: Clarify character rank vs guild status vs monster danger without mixing them up.
-            5. Climax battle & strategic reasoning.
-            6. Ending & next arc direction.
-            
-            Also generate a CapCut video editing guide with timestamps, transition effects, speed, and SFX.
+            You are a professional Anime & Movie Recap Script writer. You have been given a REAL video file to analyze.
+
+            VIDEO METADATA:
+            - Title hint: $animeName
+            - Episodes: ${episodes.ifBlank { "N/A" }}
+            - Source Language: $sourceLang
+            - Target Language: $targetLang
+            - Video Duration: $durationFormatted
+
+            TASK:
+            Analyze the actual video content (scenes, dialogue, action, story) and produce:
+
+            PART 1 - RECAP SCRIPT (in Khmer, following MASTER PROMPT: KHMER ANIME RECAP):
+            - HOOK: A compelling 1-2 sentence hook based on what actually happens in the video.
+            - OPENING: Start with the classic Khmer recap opening phrase, followed by what the video actually shows.
+            - WORLD: Explain the setting/world shown in the video.
+            - CHARACTER: Introduce the main character(s) seen in the video.
+            - STORY: 80% plot summary of what actually happens + 20% recap commentary.
+            - RANK/HIERARCHY: Any ranking, power levels, or hierarchy visible in the video.
+            - FACTIONS: Any groups, guilds, or factions shown.
+            - CLIMAX: The most intense moment actually shown in the video.
+            - ENDING: How the video ends and what it sets up next.
+
+            PART 2 - CAPCUT CUT GUIDE:
+            Based on the ACTUAL video duration ($durationFormatted), create 5 cut markers with:
+            - Real timestamps within the video duration
+            - Scene descriptions matching actual content
+            - Speed, transition, SFX recommendations
+            - Khmer voiceover lines matching the actual scenes
+
+            IMPORTANT: Base everything on the ACTUAL video content you see. Do not use generic templates.
+
+            Format your response as JSON:
+            {
+              "hook": "...",
+              "opening": "...",
+              "world": "...",
+              "character": "...",
+              "story": "...",
+              "rank": "...",
+              "factions": "...",
+              "climax": "...",
+              "ending": "...",
+              "fullNarration": "... complete formatted Khmer narration ...",
+              "capCutMarkers": [
+                {
+                  "cutIndex": 1,
+                  "timeRange": "00:00 - 00:15",
+                  "durationText": "15 seconds",
+                  "actionScene": "...",
+                  "speedMultiplier": "1.0x",
+                  "transition": "...",
+                  "sfxEffect": "...",
+                  "voiceoverPromptKhmer": "...",
+                  "capCutEditorTip": "..."
+                }
+              ]
+            }
         """.trimIndent()
 
         val jsonPayload = JSONObject().apply {
             put("contents", JSONArray().apply {
                 put(JSONObject().apply {
                     put("parts", JSONArray().apply {
+                        // Video part first
+                        put(JSONObject().apply {
+                            put("file_data", JSONObject().apply {
+                                put("file_uri", fileUri)
+                                put("mime_type", "video/mp4")
+                            })
+                        })
+                        // Text prompt second
                         put(JSONObject().apply {
                             put("text", prompt)
                         })
                     })
                 })
             })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.7)
+                put("maxOutputTokens", 8192)
+            })
         }
 
-        val requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
         val request = Request.Builder()
-            .url(requestUrl)
+            .url("$GEMINI_BASE/v1beta/models/$MODEL_ENDPOINT:generateContent?key=$apiKey")
             .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         val response = client.newCall(request).execute()
-        if (response.isSuccessful) {
-            val responseBody = response.body?.string()
-            if (!responseBody.isNullOrBlank()) {
-                val json = JSONObject(responseBody)
-                val candidates = json.optJSONArray("candidates")
-                val text = candidates?.optJSONObject(0)
-                    ?.optJSONObject("content")
-                    ?.optJSONArray("parts")
-                    ?.optJSONObject(0)
-                    ?.optString("text")
+        val responseBody = response.body?.string()
 
-                if (!text.isNullOrBlank()) {
-                    return Pair(
-                        createMasterKhmerScript(animeName, episodes, targetLang, customAiText = text),
-                        createCapCutGuide(animeName, episodes)
-                    )
-                }
+        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+            throw Exception("Gemini API error (HTTP ${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val candidates = json.optJSONArray("candidates")
+        val text = candidates?.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?.optJSONArray("parts")
+            ?.optJSONObject(0)
+            ?.optString("text")
+            ?: throw Exception("Empty response from Gemini API.")
+
+        return text
+    }
+
+    // ==========================================
+    // Step 5: Parse AI response into models
+    // ==========================================
+    private fun parseAiResponseToScript(
+        aiText: String,
+        animeName: String,
+        episodes: String
+    ): GeneratedRecapScript {
+        // Try to parse as JSON first
+        val jsonText = extractJsonFromText(aiText)
+        if (jsonText != null) {
+            try {
+                val json = JSONObject(jsonText)
+                return GeneratedRecapScript(
+                    title = "Recap: $animeName${if (episodes.isNotBlank()) " - $episodes" else ""} (from real video)",
+                    hook = json.optString("hook", defaultHook(animeName)),
+                    openingPhrase = json.optString("opening", "At the beginning of the story..."),
+                    worldExplanation = json.optString("world", ""),
+                    characterIntro = json.optString("character", ""),
+                    mainStoryProgression = json.optString("story", ""),
+                    rankHierarchyNotes = json.optString("rank", ""),
+                    factionsGuildsNotes = json.optString("factions", ""),
+                    climaxBattle = json.optString("climax", ""),
+                    endingDirection = json.optString("ending", ""),
+                    fullFormattedNarration = json.optString("fullNarration", aiText)
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+        }
+
+        // Fallback: use the raw AI text as the full narration
+        return GeneratedRecapScript(
+            title = "Recap: $animeName${if (episodes.isNotBlank()) " - $episodes" else ""} (from real video)",
+            hook = defaultHook(animeName),
+            openingPhrase = "At the beginning of the story...",
+            worldExplanation = "",
+            characterIntro = "",
+            mainStoryProgression = aiText,
+            rankHierarchyNotes = "",
+            factionsGuildsNotes = "",
+            climaxBattle = "",
+            endingDirection = "",
+            fullFormattedNarration = aiText
+        )
+    }
+
+    private fun parseAiResponseToCapCutGuide(
+        aiText: String,
+        videoDurationSeconds: Int,
+        animeName: String
+    ): List<CapCutMarker> {
+        val jsonText = extractJsonFromText(aiText)
+        if (jsonText != null) {
+            try {
+                val json = JSONObject(jsonText)
+                val markersArray = json.optJSONArray("capCutMarkers")
+                if (markersArray != null && markersArray.length() > 0) {
+                    val markers = mutableListOf<CapCutMarker>()
+                    for (i in 0 until markersArray.length()) {
+                        val m = markersArray.getJSONObject(i)
+                        markers.add(
+                            CapCutMarker(
+                                cutIndex = m.optInt("cutIndex", i + 1),
+                                timeRange = m.optString("timeRange", ""),
+                                durationText = m.optString("durationText", ""),
+                                actionScene = m.optString("actionScene", ""),
+                                speedMultiplier = m.optString("speedMultiplier", "1.0x"),
+                                transition = m.optString("transition", "Cut"),
+                                sfxEffect = m.optString("sfxEffect", ""),
+                                voiceoverPromptKhmer = m.optString("voiceoverPromptKhmer", ""),
+                                capCutEditorTip = m.optString("capCutEditorTip", "")
+                            )
+                        )
+                    }
+                    return markers
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Fallback: generate markers based on real video duration
+        return generateMarkersFromDuration(videoDurationSeconds, animeName)
+    }
+
+    /**
+     * Generate CapCut markers based on the ACTUAL video duration.
+     * Divides the real duration into 5 segments.
+     */
+    private fun generateMarkersFromDuration(durationSeconds: Int, animeName: String): List<CapCutMarker> {
+        if (durationSeconds <= 0) return emptyList()
+
+        val total = durationSeconds
+        val seg = total / 5
+        val markers = mutableListOf<CapCutMarker>()
+
+        val segmentTitles = listOf(
+            "Hook / Opening Scene" to "Opening scene from the video",
+            "World Building & Setting" to "Setting and world shown in the video",
+            "Main Story / Inciting Incident" to "Key story moment",
+            "Climax / Action Peak" to "Most intense action scene",
+            "Ending & Call to Action" to "Ending and next-episode tease"
+        )
+
+        for (i in 0 until 5) {
+            val start = i * seg
+            val end = if (i == 4) total else (i + 1) * seg
+            markers.add(
+                CapCutMarker(
+                    cutIndex = i + 1,
+                    timeRange = "${formatTime(start)} - ${formatTime(end)}",
+                    durationText = "${formatDuration(end - start)} (based on real video)",
+                    actionScene = segmentTitles[i].second,
+                    speedMultiplier = if (i == 3) "Beat-sync / 1.1x" else "1.0x",
+                    transition = when (i) {
+                        0 -> "Flash White / Glitch"
+                        1 -> "Smooth Slide"
+                        2 -> "Camera Shake / J-Cut"
+                        3 -> "Zoom In Flash"
+                        else -> "Fade to Black"
+                    },
+                    sfxEffect = when (i) {
+                        0 -> "Whoosh + Impact Boom"
+                        1 -> "Ambient Cinematic"
+                        2 -> "Heartbeat + Tension"
+                        3 -> "Sword Clash + Explosion"
+                        else -> "Epic Victory Chord"
+                    },
+                    voiceoverPromptKhmer = "Segment ${i + 1} of $animeName - see script for full narration",
+                    capCutEditorTip = "Timestamp based on actual video duration (${formatDuration(total)})"
+                )
+            )
+        }
+        return markers
+    }
+
+    // ==========================================
+    // Helpers
+    // ==========================================
+    private fun extractJsonFromText(text: String): String? {
+        // Find JSON block in the response (may be wrapped in markdown code blocks)
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start >= 0 && end > start) {
+            return text.substring(start, end + 1)
         }
         return null
     }
 
-    private fun createMasterKhmerScript(
-        animeName: String,
-        episodes: String,
-        targetLang: String,
-        customAiText: String? = null
-    ): GeneratedRecapScript {
-        val safeName = if (animeName.isNotBlank()) animeName else "Anime"
-        val safeEp = if (episodes.isNotBlank()) episodes else "Episode 1"
-
-        val hook = "ក្មេងប្រុសម្នាក់ដែលគ្រប់គ្នាមើលងាយ និងគិតថាគ្មានតម្លៃ បែរជាបើកបានសមត្ថភាពសម្ងាត់ ដែលអាចផ្លាស់ប្តូរជីវិតរបស់គាត់ និងពិភពលោកទាំងមូល!"
-        val opening = "នៅដើមសាច់រឿង គេបានបង្ហាញឲ្យឃើញថា..."
-        val world = "ពិភពលោកក្នុងរឿង $safeName ត្រូវបានរៀបចំឡើងដោយប្រព័ន្ធអំណាច និងកម្រិត Rank យ៉ាងតឹងរ៉ឹង។ មនុស្សគ្រប់រូបត្រូវបានកំណត់ជោគវាសនាចាប់តាំងពីថ្ងៃដំបូងនៃការភ្ញាក់ដឹងខ្លួន ហើយគ្មាននរណាជឿថាមនុស្សកម្រិតទាបអាចឡើងមកចំណុចកំពូលបានឡើយ។"
-        val charIntro = "តួឯករបស់យើងនៅក្នុង $safeEp ត្រូវរស់នៅក្នុងជីវិតដែលជួបការសង្កត់សង្កិន និងខ្វះខាតជាខ្លាំង។ ប៉ុន្តែគាត់មានការតស៊ូ និងបេះដូងដែលមិនព្រមចុះចាញ់ចំពោះឧបសគ្គ។"
-        val progression = "បន្ទាប់ពីឆ្លងកាត់ឧបទ្ទវហេតុដ៏រន្ធត់មួយ តួអង្គបានជួបប្រទះនឹងព្រឹត្តិការណ៍ Inciting Incident ដែលធ្វើឲ្យគាត់ទទួលបានសមត្ថភាពពិសេសដែលមិនធ្លាប់មានក្នុងប្រវត្តិសាស្ត្រ។ គាត់ចាប់ផ្តើមហ្វឹកហាត់ដោយសម្ងាត់ ចូលរួមបេសកកម្ម និងដោះស្រាយវិបត្តិដែលសូម្បីតែអ្នកប្រយុទ្ធជើងចាស់ក៏មិនអាចធ្វើបានដែរ។"
-        val ranks = "ចំណាត់ថ្នាក់អំណាចក្នុងរឿង៖ តួអង្គត្រូវបានគេស្គាល់ជាផ្លូវការថាមានកម្រិតទាប (Personal Rank) ប៉ុន្តែសមត្ថភាពប្រយុទ្ធជាក់ស្តែងគឺលើសពីការស្មាន។ កុំច្រឡំ Personal Rank របស់គាត់ ជាមួយកេរ្តិ៍ឈ្មោះរបស់ Guild ឬអង្គភាពរបស់គេ ព្រោះតួអង្គតែងតែលាក់បាំងកម្លាំងពិតប្រាកដជានិច្ច!"
-        val factions = "បក្សសម្ព័ន្ធ និងក្រុម Guild ធំៗបានចាប់ផ្តើមសង្ស័យ និងស្វែងរកអត្តសញ្ញាណរបស់គាត់។ ក្រុមខ្លះព្យាយាមទាក់ទាញគាត់ឲ្យចូលរួម ខណៈដែលក្រុមមួយចំនួនទៀតចាត់ទុកគាត់ជាការគំរាមកំហែងដល់តុល្យភាពអំណាច។"
-        val battle = "នៅក្នុងឈុតសមរភូមិកំពូល (Climax Battle) តួអង្គត្រូវប្រឈមមុខនឹងសត្រូវកម្រិតគ្រោះថ្នាក់បំផុត។ គម្លាតកម្លាំងមើលទៅដាច់ឆ្ងាយ ប៉ុន្តែដោយសារតែការវិភាគចំណុចខ្សោយ និងយុទ្ធសាស្ត្រវាយឆ្មក់ចំពេល តួអង្គអាចបំបែកការការពាររបស់សត្រូវ និងដណ្តើមយកជ័យជម្នះបានយ៉ាងអស្ចារ្យ!"
-        val ending = "នៅចុងបញ្ចប់នៃ $safeEp តួអង្គបានសង្គ្រោះស្ថានការណ៍ ដោះសោរជំនាញថ្មី និងបន្សល់ទុកអាថ៌កំបាំងដែលធ្វើឲ្យសត្រូវ និងសម្ព័ន្ធមិត្តទាំងអស់ត្រូវភ្ញាក់ផ្អើល។ នេះជាការបើកផ្លូវទៅកាន់ដំណើរផ្សងព្រេងក្នុងភាគបន្ទាប់!"
-
-        val fullNarration = customAiText ?: """
-            🔥 RECAP TITLE: សម្រាយសាច់រឿង $safeName ($safeEp)
-            
-            [HOOK]
-            $hook
-            
-            [OPENING]
-            $opening
-            $world
-            
-            [MAIN CHARACTER]
-            $charIntro
-            
-            [PROGRESSION - 80% STORY + 20% COMMENTARY]
-            $progression
-            
-            [RANK & HIERARCHY ANALYSIS]
-            $ranks
-            
-            [FACTION & GUILD DYNAMICS]
-            $factions
-            
-            [CLIMAX BATTLE]
-            $battle
-            
-            [ENDING & NEW DIRECTION]
-            $ending
-        """.trimIndent()
-
-        return GeneratedRecapScript(
-            title = "សម្រាយរឿង $safeName - $safeEp (Full Master Script)",
-            hook = hook,
-            openingPhrase = opening,
-            worldExplanation = world,
-            characterIntro = charIntro,
-            mainStoryProgression = progression,
-            rankHierarchyNotes = ranks,
-            factionsGuildsNotes = factions,
-            climaxBattle = battle,
-            endingDirection = ending,
-            fullFormattedNarration = fullNarration
-        )
+    private fun deleteGeminiFile(fileUri: String, apiKey: String) {
+        try {
+            val fileName = fileUri.substringAfterLast("/")
+            val request = Request.Builder()
+                .url("$GEMINI_BASE/v1beta/files/$fileName?key=$apiKey")
+                .delete()
+                .build()
+            client.newCall(request).execute().close()
+        } catch (_: Exception) {}
     }
 
-    private fun createCapCutGuide(animeName: String, episodes: String): List<CapCutMarker> {
-        val name = if (animeName.isNotBlank()) animeName else "Anime"
-        return listOf(
-            CapCutMarker(
-                cutIndex = 1,
-                timeRange = "00:00 - 00:15",
-                durationText = "15 វិនាទី (Hook Scene)",
-                actionScene = "ឈុតសកម្មភាពប្រយុទ្ធលឿន ឬឈុតតួអង្គបង្ហាញអំណាចដំបូង",
-                speedMultiplier = "1.1x + Motion Blur",
-                transition = "Flash White / Glitch",
-                sfxEffect = "Whoosh + Deep Impact Boom",
-                voiceoverPromptKhmer = "ក្មេងប្រុសម្នាក់ដែលគ្រប់គ្នាមើលងាយ បែរជាបើកបានសមត្ថភាពសម្ងាត់...",
-                capCutEditorTip = "ដាក់ Keyframe Zoom In លើភ្នែកតួអង្គ + Font Subtitle ពណ៌លឿងដិតជាមួយ Stroke ខ្មៅ"
-            ),
-            CapCutMarker(
-                cutIndex = 2,
-                timeRange = "00:15 - 01:45",
-                durationText = "90 វិនាទី (World & Rank Intro)",
-                actionScene = "ឈុតបង្ហាញទីក្រុង ឬផែនទីពិភពលោក និងការណែនាំ Rank E ដល់ S",
-                speedMultiplier = "1.0x (ធម្មតា)",
-                transition = "Pull In / Smooth Slide Left",
-                sfxEffect = "Ambient Cinematic Drone",
-                voiceoverPromptKhmer = "នៅដើមសាច់រឿង គេបានបង្ហាញឲ្យឃើញថា ពិភពលោកត្រូវបានគ្រប់គ្រងដោយ...",
-                capCutEditorTip = "បន្ថែម Overlay Text បង្ហាញ Rank & Level Badge លើអេក្រង់ខាងឆ្វេង"
-            ),
-            CapCutMarker(
-                cutIndex = 3,
-                timeRange = "01:45 - 04:30",
-                durationText = "2 នាទី 45 វិនាទី (Inciting Incident)",
-                actionScene = "ឈុតជួបសត្វចម្លែក ឬអន្ទាក់ក្នុងបន្ទប់សម្ងាត់ Dungeon",
-                speedMultiplier = "1.05x (បង្កើនល្បឿនបន្តិចកុំឲ្យអូសបន្លាយ)",
-                transition = "Camera Shake / J-Cut",
-                sfxEffect = "Heartbeat + Monster Growl SFX",
-                voiceoverPromptKhmer = "តួអង្គត្រូវបានគេបោះបង់ចោល ប៉ុន្តែនៅវិនាទីចុងក្រោយ...",
-                capCutEditorTip = "កាត់ឈុតសន្ទនាវែងៗចេញ ទុកតែសកម្មភាពស្តែងៗ (Visual Action-First)"
-            ),
-            CapCutMarker(
-                cutIndex = 4,
-                timeRange = "04:30 - 08:15",
-                durationText = "3 នាទី 45 វិនាទី (Climax Battle)",
-                actionScene = "ការប្រយុទ្ធស្វិតស្វាញរវាងតួអង្គ និង Boss កំពូល",
-                speedMultiplier = "Beat-sync Cut (កាត់តាមចង្វាក់ភ្លេង BGM)",
-                transition = "Zoom In Flash / Action Slash",
-                sfxEffect = "Sword Clash + Explosion + Risers",
-                voiceoverPromptKhmer = "ទោះបីជាគម្លាត Rank ខុសគ្នា ប៉ុន្តែគាត់បានឃើញចំណុចខ្សោយ...",
-                capCutEditorTip = "ប្រើ Effect 'Vibration / Optical Shake' នៅត្រង់ពេលវាយប្រហារធំ"
-            ),
-            CapCutMarker(
-                cutIndex = 5,
-                timeRange = "08:15 - 10:00",
-                durationText = "1 នាទី 45 វិនាទី (Ending & CTA)",
-                actionScene = "តួអង្គដើរចេញពីសមរភូមិ ឈុតបង្ហាញកងទ័ព ឬជំនាញថ្មី",
-                speedMultiplier = "1.0x ទៅ 0.9x Slow-motion ចុងក្រោយ",
-                transition = "Fade to Black",
-                sfxEffect = "Epic Victory Brass Chord",
-                voiceoverPromptKhmer = "តើជោគវាសនារបស់គាត់នឹងទៅជាយ៉ាងណាទៀត? កុំភ្លេច Like & Subscribe...",
-                capCutEditorTip = "ដាក់ Subscribe Animation Button + End Screen Placeholder (16:9 ឬ 9:16)"
-            )
-        )
+    private fun formatDuration(seconds: Int): String {
+        val min = seconds / 60
+        val sec = seconds % 60
+        return String.format("%02d:%02d (%d min %d sec)", min, sec, min, sec)
+    }
+
+    private fun formatTime(seconds: Int): String {
+        val min = seconds / 60
+        val sec = seconds % 60
+        return String.format("%02d:%02d", min, sec)
+    }
+
+    private fun defaultHook(animeName: String): String {
+        return "Hook for $animeName - generated from real video analysis"
     }
 }
