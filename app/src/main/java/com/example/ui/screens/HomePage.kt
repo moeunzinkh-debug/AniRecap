@@ -42,6 +42,7 @@ fun HomePage(
     val videoUri by studioViewModel.videoUri.collectAsState()
     val videoFileName by studioViewModel.videoFileName.collectAsState()
     val videoFileSize by studioViewModel.videoFileSize.collectAsState()
+    val videoDurationSeconds by studioViewModel.videoDurationSeconds.collectAsState()
     val animeOrMovieName by studioViewModel.animeOrMovieName.collectAsState()
     val episodes by studioViewModel.episodes.collectAsState()
     val sourceLanguage by studioViewModel.sourceLanguage.collectAsState()
@@ -49,6 +50,7 @@ fun HomePage(
     val selectedModel by studioViewModel.selectedModel.collectAsState()
     val isAnalyzing by studioViewModel.isAnalyzing.collectAsState()
     val progressMessage by studioViewModel.analysisProgressMessage.collectAsState()
+    val errorMessage by studioViewModel.errorMessage.collectAsState()
 
     // File picker launcher
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -56,7 +58,13 @@ fun HomePage(
     ) { uri: Uri? ->
         if (uri != null) {
             val displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "uploaded_video.mp4"
-            studioViewModel.onVideoPicked(uri, displayName, "Selected from Device")
+            val sizeStr = try {
+                val sizeBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+                formatFileSize(sizeBytes)
+            } catch (e: Exception) {
+                "Unknown size"
+            }
+            studioViewModel.onVideoPicked(uri, displayName, sizeStr)
         }
     }
 
@@ -65,9 +73,12 @@ fun HomePage(
     var targetLangExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
 
-    val sourceLangOptions = listOf("Auto Detect", "Japanese (日本語)", "Korean (한국어)", "Chinese (中文)", "English")
-    val targetLangOptions = listOf("Khmer & English target", "Khmer (ភាសាខ្មែរ)", "English")
+    val sourceLangOptions = listOf("Auto Detect", "Japanese", "Korean", "Chinese", "English")
+    val targetLangOptions = listOf("Khmer & English target", "Khmer", "English")
     val modelOptions = listOf("Gemini 3.8", "Gemini 3.7", "Gemini 3.6", "Gemini 3.5")
+
+    // Validation: can only analyze with a real video + name
+    val canAnalyze = videoUri != null && animeOrMovieName.isNotBlank() && !isAnalyzing
 
     Column(
         modifier = modifier
@@ -93,11 +104,40 @@ fun HomePage(
                 )
             }
             Text(
-                text = if (isKhmer) "ប្រព័ន្ធស្វ័យប្រវត្តិកាត់ត និងបង្កើត Script សម្រាយសាច់រឿងជាមួយ Gemini" 
-                       else "Automated Anime & Movie Recap Analysis with Gemini Models",
+                text = if (isKhmer) "AI Video Analysis - creates recap scripts from your uploaded video"
+                       else "Real AI-powered Anime & Movie Recap Analysis from YOUR uploaded video",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        // Error message display
+        AnimatedVisibility(visible = errorMessage != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = ErrorRed.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Error, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(20.dp))
+                    Text(
+                        text = errorMessage ?: "",
+                        fontSize = 12.sp,
+                        color = ErrorRed,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = { studioViewModel.clearError() }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = ErrorRed, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
         }
 
         // Section 1: Upload Video Box
@@ -112,7 +152,7 @@ fun HomePage(
                 .testTag("upload_video_box"),
             border = androidx.compose.foundation.BorderStroke(
                 1.5.dp,
-                if (videoUri != null) CrimsonRedBright else MaterialTheme.colorScheme.outlineVariant
+                if (videoUri != null) SuccessGreen else MaterialTheme.colorScheme.outlineVariant
             )
         ) {
             Column(
@@ -126,57 +166,64 @@ fun HomePage(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(CrimsonRedBright.copy(alpha = 0.15f)),
+                        .background(
+                            if (videoUri != null) SuccessGreen.copy(alpha = 0.15f)
+                            else AuraCyan.copy(alpha = 0.15f)
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (videoUri != null) Icons.Default.CheckCircle else Icons.Default.CloudUpload,
                         contentDescription = "Upload Video",
-                        tint = if (videoUri != null) CrimsonRedBright else AuraCyan,
+                        tint = if (videoUri != null) SuccessGreen else AuraCyan,
                         modifier = Modifier.size(32.dp)
                     )
                 }
 
                 Text(
-                    text = if (videoUri != null) "វីដេអូបានជ្រើសរើសរួចរាល់ (Video Selected)" else "Upload Video (ជ្រើសរើសវីដេអូ)",
+                    text = if (videoUri != null) "Video Selected" else "Upload Your Video",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                if (videoUri != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = null,
-                            tint = CrimsonRedBright,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "$videoFileName • $videoFileSize",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, tint = CrimsonRedBright, modifier = Modifier.size(16.dp))
+                                Text(videoFileName, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                            if (videoFileSize.isNotBlank()) {
+                                Text(videoFileSize, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (videoDurationSeconds > 0) {
+                                Text("Duration: ${formatDuration(videoDurationSeconds)}", fontSize = 11.sp, color = AuraCyan, fontWeight = FontWeight.Medium)
+                            }
+                        }
                     }
+                } else {
+                    Text("No video selected. Tap to upload your real video file.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 Text(
-                    text = "ចុចទីនេះដើម្បី Upload ពីទូរស័ព្ទ (MP4, MKV, AVI)",
+                    text = if (videoUri != null) "Tap to change video" else "Tap to select video from your device (MP4, MKV, AVI)",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        // Section 2: Movie/Anime Name & Episodes []
+        // Section 2: Movie/Anime Name & Episodes
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -184,29 +231,26 @@ fun HomePage(
             OutlinedTextField(
                 value = animeOrMovieName,
                 onValueChange = { studioViewModel.animeOrMovieName.value = it },
-                label = { Text("Movie/Anime Name") },
-                placeholder = { Text("Solo Leveling, JJK...") },
-                modifier = Modifier
-                    .weight(1.4f)
-                    .testTag("input_anime_name"),
+                label = { Text("Movie/Anime Name *") },
+                placeholder = { Text("Enter the actual name...") },
+                modifier = Modifier.weight(1.4f).testTag("input_anime_name"),
                 shape = RoundedCornerShape(10.dp),
-                singleLine = true
+                singleLine = true,
+                isError = animeOrMovieName.isBlank() && errorMessage != null
             )
 
             OutlinedTextField(
                 value = episodes,
                 onValueChange = { studioViewModel.episodes.value = it },
-                label = { Text("Episodes []") },
+                label = { Text("Episodes") },
                 placeholder = { Text("EP 1 - 12") },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("input_episodes"),
+                modifier = Modifier.weight(1f).testTag("input_episodes"),
                 shape = RoundedCornerShape(10.dp),
                 singleLine = true
             )
         }
 
-        // Section 3: Default Language Auto detect
+        // Section 3: Source Language
         ExposedDropdownMenuBox(
             expanded = sourceLangExpanded,
             onExpandedChange = { sourceLangExpanded = !sourceLangExpanded },
@@ -216,32 +260,21 @@ fun HomePage(
                 value = sourceLanguage,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Default Language (ភាសាដើម)") },
+                label = { Text("Source Language (from video)") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sourceLangExpanded) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth()
-                    .testTag("dropdown_source_language"),
+                modifier = Modifier.menuAnchor().fillMaxWidth().testTag("dropdown_source_language"),
                 shape = RoundedCornerShape(10.dp)
             )
-
-            ExposedDropdownMenu(
-                expanded = sourceLangExpanded,
-                onDismissRequest = { sourceLangExpanded = false }
-            ) {
+            ExposedDropdownMenu(expanded = sourceLangExpanded, onDismissRequest = { sourceLangExpanded = false }) {
                 sourceLangOptions.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            studioViewModel.sourceLanguage.value = option
-                            sourceLangExpanded = false
-                        }
-                    )
+                    DropdownMenuItem(text = { Text(option) }, onClick = {
+                        studioViewModel.sourceLanguage.value = option; sourceLangExpanded = false
+                    })
                 }
             }
         }
 
-        // Section 4: Target Language (Khmer & English target)
+        // Section 4: Target Language
         ExposedDropdownMenuBox(
             expanded = targetLangExpanded,
             onExpandedChange = { targetLangExpanded = !targetLangExpanded },
@@ -251,32 +284,21 @@ fun HomePage(
                 value = targetLanguage,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Target Language (ភាសាសម្រាយ)") },
+                label = { Text("Target Language") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = targetLangExpanded) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth()
-                    .testTag("dropdown_target_language"),
+                modifier = Modifier.menuAnchor().fillMaxWidth().testTag("dropdown_target_language"),
                 shape = RoundedCornerShape(10.dp)
             )
-
-            ExposedDropdownMenu(
-                expanded = targetLangExpanded,
-                onDismissRequest = { targetLangExpanded = false }
-            ) {
+            ExposedDropdownMenu(expanded = targetLangExpanded, onDismissRequest = { targetLangExpanded = false }) {
                 targetLangOptions.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            studioViewModel.targetLanguage.value = option
-                            targetLangExpanded = false
-                        }
-                    )
+                    DropdownMenuItem(text = { Text(option) }, onClick = {
+                        studioViewModel.targetLanguage.value = option; targetLangExpanded = false
+                    })
                 }
             }
         }
 
-        // Section 5: Models select drop-down: Gemini: 3.5 3.6 3.7 3.8
+        // Section 5: Model select
         ExposedDropdownMenuBox(
             expanded = modelExpanded,
             onExpandedChange = { modelExpanded = !modelExpanded },
@@ -286,52 +308,29 @@ fun HomePage(
                 value = "Gemini: $selectedModel",
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Models select (ជ្រើសរើស Model)") },
+                label = { Text("AI Model") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth()
-                    .testTag("dropdown_gemini_model"),
+                modifier = Modifier.menuAnchor().fillMaxWidth().testTag("dropdown_gemini_model"),
                 shape = RoundedCornerShape(10.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = ManaVioletLight,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline
                 )
             )
-
-            ExposedDropdownMenu(
-                expanded = modelExpanded,
-                onDismissRequest = { modelExpanded = false }
-            ) {
+            ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
                 modelOptions.forEach { modelName ->
                     DropdownMenuItem(
                         text = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                                 Text("Gemini $modelName", fontWeight = FontWeight.Bold)
                                 if (modelName == "3.8") {
-                                    Surface(
-                                        color = CrimsonRedBright.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(4.dp)
-                                    ) {
-                                        Text(
-                                            "RECOMMENDED",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = CrimsonRedBright,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                        )
+                                    Surface(color = CrimsonRedBright.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                        Text("RECOMMENDED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = CrimsonRedBright, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                                     }
                                 }
                             }
                         },
-                        onClick = {
-                            studioViewModel.selectedModel.value = modelName
-                            modelExpanded = false
-                        }
+                        onClick = { studioViewModel.selectedModel.value = modelName; modelExpanded = false }
                     )
                 }
             }
@@ -340,68 +339,53 @@ fun HomePage(
         // Section 6: Analyze Action Button
         Button(
             onClick = { studioViewModel.runAnalyze() },
-            enabled = !isAnalyzing,
+            enabled = canAnalyze,
             colors = ButtonDefaults.buttonColors(
-                containerColor = CrimsonRedBright
+                containerColor = CrimsonRedBright,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
             ),
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .testTag("analyze_button")
+            modifier = Modifier.fillMaxWidth().height(54.dp).testTag("analyze_button")
         ) {
             if (isAnalyzing) {
-                CircularProgressIndicator(
-                    color = Color.White,
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.5.dp
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Analyzing with $selectedModel...",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("Analyzing your video with $selectedModel...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             } else {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Analyze (វិភាគ និងបង្កើត Recap)",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (canAnalyze) "Analyze My Video" else "Upload video + enter name to start", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+        }
+
+        if (!canAnalyze && !isAnalyzing) {
+            Text("Step 1: Upload your video. Step 2: Enter the anime/movie name. Step 3: Tap Analyze.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
         }
 
         // Progress Message display
         AnimatedVisibility(visible = isAnalyzing) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = AuraCyan
-                    )
-                    Text(
-                        text = progressMessage,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium
-                    )
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = AuraCyan)
+                    Text(progressMessage, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
                 }
             }
         }
     }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return "%.1f MB".format(mb)
+    val gb = mb / 1024.0
+    return "%.2f GB".format(gb)
+}
+
+private fun formatDuration(seconds: Int): String {
+    val min = seconds / 60
+    val sec = seconds % 60
+    return "%d:%02d".format(min, sec)
 }

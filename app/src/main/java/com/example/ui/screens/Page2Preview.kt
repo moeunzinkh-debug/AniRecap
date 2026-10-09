@@ -43,11 +43,11 @@ fun Page2Preview(
     val project by studioViewModel.activeProject.collectAsState()
 
     var isPlaying by remember { mutableStateOf(false) }
-    var currentSeconds by remember { mutableIntStateOf(15) }
-    val totalSeconds = 600 // 10 minutes
+    var currentSeconds by remember { mutableIntStateOf(0) }
+    val totalSeconds = project?.videoDurationSeconds ?: 600
 
     var selectedAspect16_9 by remember { mutableStateOf(true) } // true: 16:9, false: 9:16
-    var activeTab by remember { mutableIntStateOf(0) } // 0: Script new story Recaps, 1: Guide cut Recap for Capcut
+    var activeTab by remember { mutableIntStateOf(0) } // 0: Script, 1: CapCut Guide
 
     var isEditingScript by remember { mutableStateOf(false) }
     var editableScriptText by remember { mutableStateOf("") }
@@ -56,6 +56,7 @@ fun Page2Preview(
         project?.script?.let {
             editableScriptText = it.fullFormattedNarration
         }
+        currentSeconds = 0
     }
 
     // Playback loop simulation
@@ -70,6 +71,55 @@ fun Page2Preview(
         }
     }
 
+    // ==========================================
+    // EMPTY STATE — no fake/sample data shown
+    // ==========================================
+    if (project == null) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.VideoLibrary,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(80.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "No Recap Generated Yet",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Upload a real video on the Home page and tap Analyze to generate your recap script and CapCut guide.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) },
+                colors = ButtonDefaults.buttonColors(containerColor = CrimsonRedBright),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Go to Upload", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        return
+    }
+
+    // ==========================================
+    // REAL PROJECT DATA — from actual video analysis
+    // ==========================================
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -85,16 +135,23 @@ fun Page2Preview(
         ) {
             Column {
                 Text(
-                    text = "Page 2: Monitor & Results",
+                    text = "Monitor & Results",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${project?.animeOrMovieName ?: "Recap"} • ${project?.episodes ?: ""}",
+                    text = "${project.animeOrMovieName} ${if (project.episodes.isNotBlank()) "• ${project.episodes}" else ""} • ${project.videoFileName}",
                     fontSize = 12.sp,
                     color = ManaVioletLight
                 )
+                if (project.videoDurationSeconds > 0) {
+                    Text(
+                        text = "Real video duration: ${formatDuration(project.videoDurationSeconds)}",
+                        fontSize = 11.sp,
+                        color = AuraCyan
+                    )
+                }
             }
 
             // Aspect ratio toggle
@@ -130,10 +187,7 @@ fun Page2Preview(
         }
 
         // ==========================================
-        // Video monitor preview
-        // ----------------
-        // -              -
-        // ________________
+        // Video monitor preview — shows REAL video info
         // ==========================================
         Card(
             shape = RoundedCornerShape(12.dp),
@@ -144,14 +198,13 @@ fun Page2Preview(
                 .testTag("video_monitor_preview")
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                // Monitor Grid and Frame simulation
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(10.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Top Monitor Bar: REC ●, Resolution, Model
+                    // Top Monitor Bar: REC, Resolution, Model
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -166,7 +219,7 @@ fun Page2Preview(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "MONITOR PREVIEW",
+                                text = "VIDEO MONITOR",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -174,14 +227,41 @@ fun Page2Preview(
                         }
 
                         Text(
-                            text = "${project?.selectedModel ?: "Gemini 3.8"} • 1080P",
+                            text = "${project.selectedModel} • Real Video",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
                             color = AuraCyan
                         )
                     }
 
-                    // Center Play/Action Focus & Framing
+                    // Video info display (file name + duration)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = project.videoFileName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        if (project.videoFileSize.isNotBlank()) {
+                            Text(
+                                text = project.videoFileSize,
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                        if (project.videoDurationSeconds > 0) {
+                            Text(
+                                text = "Duration: ${formatDuration(project.videoDurationSeconds)}",
+                                fontSize = 10.sp,
+                                color = GoldLegendary
+                            )
+                        }
+                    }
+
+                    // Center Play/Action Focus
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
@@ -203,7 +283,7 @@ fun Page2Preview(
                         Slider(
                             value = currentSeconds.toFloat(),
                             onValueChange = { currentSeconds = it.toInt() },
-                            valueRange = 0f..totalSeconds.toFloat(),
+                            valueRange = 0f..totalSeconds.toFloat().coerceAtLeast(1f),
                             colors = SliderDefaults.colors(
                                 thumbColor = CrimsonRedBright,
                                 activeTrackColor = CrimsonRedBright,
@@ -218,19 +298,15 @@ fun Page2Preview(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val curMin = currentSeconds / 60
-                            val curSec = currentSeconds % 60
-                            val totMin = totalSeconds / 60
-                            val totSec = totalSeconds % 60
                             Text(
-                                text = String.format("%02d:%02d / %02d:%02d", curMin, curSec, totMin, totSec),
+                                text = "${formatTimecode(currentSeconds)} / ${formatTimecode(totalSeconds)}",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
 
                             Text(
-                                text = "CapCut Cut Sync: Frame ${currentSeconds * 30}",
+                                text = "CapCut Sync: Frame ${currentSeconds * 30}",
                                 color = GoldLegendary,
                                 fontSize = 10.sp
                             )
@@ -240,7 +316,7 @@ fun Page2Preview(
             }
         }
 
-        // Section Tabs: "Script new story Recaps" vs "Guide cut Recap for Capcut"
+        // Section Tabs
         TabRow(
             selectedTabIndex = activeTab,
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -252,7 +328,7 @@ fun Page2Preview(
                 onClick = { activeTab = 0 },
                 text = {
                     Text(
-                        "Script new story Recaps",
+                        "Recap Script",
                         fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 13.sp
                     )
@@ -265,7 +341,7 @@ fun Page2Preview(
                 onClick = { activeTab = 1 },
                 text = {
                     Text(
-                        "Guide cut Recap for Capcut",
+                        "CapCut Guide",
                         fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 13.sp
                     )
@@ -275,18 +351,17 @@ fun Page2Preview(
         }
 
         // ==========================================
-        // Tab 0: Script new story Recaps
+        // Tab 0: Recap Script (from real video analysis)
         // ==========================================
         if (activeTab == 0) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Action row: Copy, Edit, Re-generate
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Script សម្រាយសាច់រឿង (Master Format)",
+                        text = "Script (from real video analysis)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -298,7 +373,7 @@ fun Page2Preview(
                                 if (isEditingScript) {
                                     studioViewModel.updateScriptContent(editableScriptText)
                                     isEditingScript = false
-                                    Toast.makeText(context, "បានរក្សាទុក Script រួចរាល់", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Script saved", Toast.LENGTH_SHORT).show()
                                 } else {
                                     isEditingScript = true
                                 }
@@ -319,13 +394,13 @@ fun Page2Preview(
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("AniRecap Script", editableScriptText)
                                 clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "ចម្លង Script រួចរាល់! (Copied to Clipboard)", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Script copied to clipboard!", Toast.LENGTH_SHORT).show()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = CrimsonRedBright),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                             modifier = Modifier.testTag("copy_script_button")
                         ) {
-                            Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Copy Script", fontSize = 11.sp)
                         }
@@ -342,7 +417,7 @@ fun Page2Preview(
                         shape = RoundedCornerShape(10.dp)
                     )
                 } else {
-                    project?.script?.let { script ->
+                    project.script?.let { script ->
                         // Hook Card
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -351,14 +426,14 @@ fun Page2Preview(
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Text(
-                                    text = "🔥 Hook ចំណុចទាក់ទាញដំបូង:",
+                                    text = "Hook:",
                                     fontWeight = FontWeight.Bold,
                                     color = CrimsonRedBright,
                                     fontSize = 12.sp
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "“${script.hook}”",
+                                    text = "\"${script.hook}\"",
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -375,7 +450,7 @@ fun Page2Preview(
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    text = "ខ្លឹមសារនិទានសម្រាយ (Plot-First 80% Story + 20% Recap):",
+                                    text = "Full Narration (generated from your uploaded video):",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AuraCyan
@@ -394,11 +469,10 @@ fun Page2Preview(
         }
 
         // ==========================================
-        // Tab 1: Guide cut Recap for Capcut
+        // Tab 1: CapCut Guide (based on real video duration)
         // ==========================================
         if (activeTab == 1) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Header & Copy Guide
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -406,13 +480,13 @@ fun Page2Preview(
                 ) {
                     Column {
                         Text(
-                            text = "CapCut Cut Roadmaps",
+                            text = "CapCut Cut Roadmap",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Timestamp, Speed, SFX, និងគន្លឹះកាត់តក្នុង CapCut",
+                            text = "Timestamps based on real video duration (${formatDuration(project.videoDurationSeconds)})",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -421,8 +495,10 @@ fun Page2Preview(
                     Button(
                         onClick = {
                             val guideText = buildString {
-                                appendLine("=== CAPCUT CUT GUIDE: ${project?.animeOrMovieName} ===")
-                                project?.capCutGuide?.forEach {
+                                appendLine("=== CAPCUT CUT GUIDE: ${project.animeOrMovieName} ===")
+                                appendLine("Video: ${project.videoFileName} (${formatDuration(project.videoDurationSeconds)})")
+                                appendLine()
+                                project.capCutGuide.forEach {
                                     appendLine("[Cut #${it.cutIndex}] ${it.timeRange} (${it.durationText})")
                                     appendLine("Scene: ${it.actionScene}")
                                     appendLine("Speed: ${it.speedMultiplier} | Transition: ${it.transition} | SFX: ${it.sfxEffect}")
@@ -434,19 +510,19 @@ fun Page2Preview(
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = ClipData.newPlainText("CapCut Cut Guide", guideText)
                             clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "ចម្លង CapCut Cut Guide រួចរាល់!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "CapCut guide copied!", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = ManaViolet),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         modifier = Modifier.testTag("copy_capcut_guide_button")
                     ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Markers", fontSize = 11.sp)
+                        Text("Copy Guide", fontSize = 11.sp)
                     }
                 }
 
-                // CapCut Recommendations Card
+                // BGM & Template recommendations
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     shape = RoundedCornerShape(10.dp),
@@ -456,18 +532,18 @@ fun Page2Preview(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.MusicNote, contentDescription = null, tint = AuraCyan, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("BGM Recommendation: ${project?.bgmRecommendation}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("BGM: ${project.bgmRecommendation}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AspectRatio, contentDescription = null, tint = GoldLegendary, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("CapCut Setting: ${project?.capCutTemplateAdvice}", fontSize = 12.sp)
+                            Text("Format: ${project.capCutTemplateAdvice}", fontSize = 12.sp)
                         }
                     }
                 }
 
                 // List of CapCut Cut markers
-                project?.capCutGuide?.forEach { marker ->
+                project.capCutGuide.forEach { marker ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(10.dp),
@@ -475,7 +551,6 @@ fun Page2Preview(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // Cut number & Time Range
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -502,13 +577,12 @@ fun Page2Preview(
                             }
 
                             Text(
-                                text = "ឈុតឆាក: ${marker.actionScene}",
+                                text = "Scene: ${marker.actionScene}",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            // Speed, Transition, SFX badges
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -518,23 +592,21 @@ fun Page2Preview(
                                 MarkerBadge(label = "SFX: ${marker.sfxEffect}", color = GoldLegendary)
                             }
 
-                            // Voiceover Prompt
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceVariant,
                                 shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = "🎤 Voiceover: “${marker.voiceoverPromptKhmer}”",
+                                    text = "Voiceover: \"${marker.voiceoverPromptKhmer}\"",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.padding(8.dp)
                                 )
                             }
 
-                            // CapCut Specific Pro Tip
                             Text(
-                                text = "💡 CapCut Editor Tip: ${marker.capCutEditorTip}",
+                                text = "Tip: ${marker.capCutEditorTip}",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
@@ -561,4 +633,16 @@ fun MarkerBadge(label: String, color: Color) {
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
         )
     }
+}
+
+private fun formatDuration(seconds: Int): String {
+    val min = seconds / 60
+    val sec = seconds % 60
+    return String.format("%d:%02d", min, sec)
+}
+
+private fun formatTimecode(seconds: Int): String {
+    val min = seconds / 60
+    val sec = seconds % 60
+    return String.format("%02d:%02d", min, sec)
 }
