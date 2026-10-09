@@ -22,11 +22,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppLanguage
 import com.example.data.AppSettings
 import com.example.ui.AniRecapStudioViewModel
+import com.example.ui.components.StudioKicker
+import com.example.ui.components.StudioStyle
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,11 +87,13 @@ fun HomePage(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(StudioStyle.screenPadding)
+            .padding(top = 18.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(StudioStyle.sectionGap)
     ) {
-        // App Title Banner
-        Column {
+        // Page label stays subordinate to the app wordmark.
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            StudioKicker("Page 1 · Upload & Analyze")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Ani",
@@ -104,9 +109,10 @@ fun HomePage(
                 )
             }
             Text(
-                text = if (isKhmer) "AI Video Analysis - creates recap scripts from your uploaded video"
+                text = if (isKhmer) "បង្កើត script សម្រាយសាច់រឿងពីវីដេអូរបស់អ្នក"
                        else "Real AI-powered Anime & Movie Recap Analysis from YOUR uploaded video",
                 fontSize = 12.sp,
+                lineHeight = 20.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -350,11 +356,25 @@ fun HomePage(
             if (isAnalyzing) {
                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
                 Spacer(Modifier.width(12.dp))
-                Text("Analyzing your video with $selectedModel...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Analyzing with $selectedModel…",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
             } else {
                 Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (canAnalyze) "Analyze My Video" else "Upload video + enter name to start", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (canAnalyze) "Analyze My Video" else "Add video + title to start",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 

@@ -3,37 +3,141 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.OndemandVideo
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.CapCutMarker
-import com.example.model.GeneratedRecapScript
 import com.example.model.RecapProject
 import com.example.ui.AniRecapStudioViewModel
 import com.example.ui.StudioNavScreen
-import com.example.ui.theme.*
+import com.example.ui.components.StudioCard
+import com.example.ui.components.StudioDivider
+import com.example.ui.components.StudioEmptyBlock
+import com.example.ui.components.StudioInfoRow
+import com.example.ui.components.StudioKicker
+import com.example.ui.components.StudioMetaChip
+import com.example.ui.components.StudioOutlineButton
+import com.example.ui.components.StudioPrimaryButton
+import com.example.ui.components.StudioQuoteBlock
+import com.example.ui.components.StudioSecondaryButton
+import com.example.ui.components.StudioSectionHeader
+import com.example.ui.components.StudioStatusPill
+import com.example.ui.components.StudioStyle
+import com.example.ui.components.StudioTag
+import com.example.ui.components.StudioTextButton
+import com.example.ui.theme.AuraCyan
+import com.example.ui.theme.CrimsonRedBright
+import com.example.ui.theme.ErrorRed
+import com.example.ui.theme.GoldLegendary
+import com.example.ui.theme.SuccessGreen
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.WarningAmber
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
+/** Export target chosen from the header dropdown (replaces the old chip cluster). */
+private enum class StudioFormat(
+    val menuLabel: String,
+    val shortLabel: String,
+    val hint: String,
+    val frameRatio: Float
+) {
+    Wide("16:9 · YouTube", "16:9", "Widescreen master for long-form recap uploads.", 16f / 9f),
+    Vertical("9:16 · TikTok / Shorts", "9:16", "Vertical crop — use CapCut Smart Auto Reframe.", 9f / 16f),
+    Square("1:1 · Feed preview", "1:1", "Square safe area for feed and thumbnail tests.", 1f)
+}
+
+private data class StudioTabSpec(val label: String, val icon: ImageVector)
+
+private const val TIMELINE_FPS = 30
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun Page2Preview(
     studioViewModel: AniRecapStudioViewModel,
@@ -41,608 +145,971 @@ fun Page2Preview(
 ) {
     val context = LocalContext.current
     val project by studioViewModel.activeProject.collectAsState()
+    val isPlaying by studioViewModel.isMonitorPlaying.collectAsState()
+    val positionSeconds by studioViewModel.monitorPositionSeconds.collectAsState()
+    val thumbnail by studioViewModel.videoThumbnail.collectAsState()
 
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentSeconds by remember { mutableIntStateOf(0) }
-    val totalSeconds = project?.videoDurationSeconds ?: 600
-
-    var selectedAspect16_9 by remember { mutableStateOf(true) } // true: 16:9, false: 9:16
-    var activeTab by remember { mutableIntStateOf(0) } // 0: Script, 1: CapCut Guide
-
+    var format by remember { mutableStateOf(StudioFormat.Wide) }
+    var activeTab by rememberSaveable { mutableIntStateOf(0) }
     var isEditingScript by remember { mutableStateOf(false) }
-    var editableScriptText by remember { mutableStateOf("") }
+    var draftScript by remember { mutableStateOf("") }
 
-    LaunchedEffect(project) {
-        project?.script?.let {
-            editableScriptText = it.fullFormattedNarration
-        }
-        currentSeconds = 0
+    val activeProject = project
+    val totalSeconds = activeProject?.videoDurationSeconds?.takeIf { it > 0 } ?: 0
+    val playhead = positionSeconds.coerceIn(0f, totalSeconds.coerceAtLeast(1).toFloat())
+    val playheadFrame = (playhead * TIMELINE_FPS).roundToInt()
+
+    LaunchedEffect(activeProject?.id) {
+        draftScript = activeProject?.script?.fullFormattedNarration ?: ""
+        isEditingScript = false
     }
 
-    // Playback loop simulation
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            delay(1000)
-            if (currentSeconds < totalSeconds) {
-                currentSeconds++
-            } else {
-                isPlaying = false
+    // Playback simulation, driven from the ViewModel so the playhead survives
+    // tab switches.
+    LaunchedEffect(isPlaying, totalSeconds) {
+        while (isPlaying && totalSeconds > 0) {
+            delay(100)
+            val next = studioViewModel.monitorPositionSeconds.value + 0.1f
+            if (next >= totalSeconds) {
+                studioViewModel.seekMonitorTo(totalSeconds.toFloat())
+                studioViewModel.stopMonitor()
+                break
             }
+            studioViewModel.seekMonitorTo(next)
         }
     }
 
-    // ==========================================
-    // EMPTY STATE — no fake/sample data shown
-    // ==========================================
-    if (project == null) {
+    // ==========================================================
+    // EMPTY STATE — nothing analysed yet (no fake/sample content)
+    // ==========================================================
+    if (activeProject == null) {
         Column(
             modifier = modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(28.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                imageVector = Icons.Default.VideoLibrary,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(80.dp)
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.OndemandVideo,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(18.dp))
             Text(
-                text = "No Recap Generated Yet",
-                fontSize = 20.sp,
+                text = "Nothing on the monitor yet",
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Upload a real video on the Home page and tap Analyze to generate your recap script and CapCut guide.",
-                fontSize = 14.sp,
+                text = "Upload a video on the Home tab and tap Analyze. The script and the CapCut cut list will appear here, timed to your real runtime.",
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
+            Spacer(modifier = Modifier.height(20.dp))
+            StudioPrimaryButton(
+                text = "Go to Upload",
+                icon = Icons.Default.CloudUpload,
                 onClick = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) },
-                colors = ButtonDefaults.buttonColors(containerColor = CrimsonRedBright),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Go to Upload", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
+                modifier = Modifier.fillMaxWidth()
+            )
         }
         return
     }
 
-    // ==========================================
-    // REAL PROJECT DATA — from actual video analysis
-    // ==========================================
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    val script = activeProject.script
+    val narration = script?.fullFormattedNarration.orEmpty()
+    val cuts = activeProject.capCutGuide
+    val activeCutIndex = cuts.indexOfFirst { marker ->
+        val start = marker.startSeconds()
+        val end = marker.endSeconds()
+        start != null && playhead >= start && (end == null || playhead < end)
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = StudioStyle.screenPadding)
+                .padding(top = 18.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(StudioStyle.sectionGap)
+        ) {
+            // ==========================================================
+            // HEADER — page label first, real title dominant, one format control
+            // ==========================================================
+            Row(verticalAlignment = Alignment.Top) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StudioKicker("Page 2 · Monitor & Results")
+                    Text(
+                        text = activeProject.animeOrMovieName.ifBlank { "Untitled Recap" },
+                        fontSize = StudioStyle.pageTitleSize,
+                        fontWeight = FontWeight.Black,
+                        lineHeight = 28.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                FormatSelector(
+                    selected = format,
+                    onSelect = { format = it }
+                )
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (activeProject.episodes.isNotBlank()) {
+                    StudioMetaChip(text = activeProject.episodes, icon = Icons.Default.Subtitles)
+                }
+                if (totalSeconds > 0) {
+                    StudioMetaChip(
+                        text = "Runtime ${formatDuration(totalSeconds)}",
+                        icon = Icons.Default.Schedule,
+                        tint = AuraCyan
+                    )
+                }
+                if (activeProject.videoFileSize.isNotBlank()) {
+                    StudioMetaChip(
+                        text = activeProject.videoFileSize,
+                        icon = Icons.Default.Bolt,
+                        tint = SuccessGreen
+                    )
+                }
+                StudioMetaChip(
+                    text = activeProject.selectedModel,
+                    icon = Icons.Default.Speed,
+                    tint = GoldLegendary
+                )
+            }
+
+            // ==========================================================
+            // MONITOR PREVIEW
+            // ==========================================================
+            MonitorPreviewCard(
+                project = activeProject,
+                thumbnail = thumbnail,
+                format = format,
+                isPlaying = isPlaying,
+                playheadSeconds = playhead,
+                totalSeconds = totalSeconds,
+                playheadFrame = playheadFrame,
+                inCutRange = activeCutIndex >= 0,
+                onTogglePlay = { studioViewModel.toggleMonitorPlay() },
+                onSeek = { studioViewModel.seekMonitorTo(it) }
+            )
+
+            // ==========================================================
+            // TABS
+            // ==========================================================
+            StudioSegmentedTabs(
+                tabs = listOf(
+                    StudioTabSpec("Recap Script", Icons.Default.Movie),
+                    StudioTabSpec("CapCut Guide", Icons.Default.ContentCut)
+                ),
+                selectedIndex = activeTab,
+                onSelect = { activeTab = it }
+            )
+
+            Crossfade(targetState = activeTab, label = "studio_tab_content") { tabIndex ->
+                when (tabIndex) {
+                    // ==========================================================
+                    // TAB 0 — narration script
+                    // ==========================================================
+                    0 -> Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
+                    ) {
+                        StudioSectionHeader(
+                            kicker = "Master script",
+                            title = "សម្រាយសាច់រឿង (plot-first narration)",
+                            subtitle = if (narration.isNotBlank()) {
+                                val words = narration.wordCount()
+                                "${words} words · ~${formatDuration((words / 2.4f).roundToInt())} voice-over at 145 wpm"
+                            } else {
+                                "No narration generated for this video yet."
+                            }
+                        )
+
+                        if (script == null) {
+                            StudioEmptyBlock(
+                                icon = Icons.Default.Movie,
+                                title = "មិនទាន់មាន Script សម្រាយសាច់រឿងនៅឡើយទេ",
+                                message = "Re-run the analysis from the Upload tab to generate the Khmer recap narration.",
+                                actionLabel = "Back to Upload",
+                                onAction = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) }
+                            )
+                        } else {
+                            StudioCard(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                borderColor = Color.Transparent,
+                                verticalSpacing = 6.dp
+                            ) {
+                                StudioKicker("ចំណុចទាក់ទាញដំបូង · Hook", color = CrimsonRedBright)
+                                Text(
+                                    text = "\"${script.hook}\"",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 24.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            StudioCard {
+                                StudioKicker("Full narration · ដំណើររឿង")
+                                StudioDivider()
+                                if (isEditingScript) {
+                                    OutlinedTextField(
+                                        value = draftScript,
+                                        onValueChange = { draftScript = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 300.dp),
+                                        shape = RoundedCornerShape(StudioStyle.innerRadius),
+                                        label = { Text("Edit the narration") },
+                                        supportingText = {
+                                            Text(
+                                                "Saved on this device only — the AI output is not overwritten.",
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    )
+                                } else {
+                                    SelectionContainer {
+                                        Text(
+                                            text = narration,
+                                            fontSize = 15.sp,
+                                            lineHeight = 27.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================================
+                    // TAB 1 — CapCut cut roadmap
+                    // ==========================================================
+                    1 -> Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
+                    ) {
+                        StudioSectionHeader(
+                            kicker = "CapCut editing roadmap",
+                            title = "${cuts.size} cut markers · ${formatDuration(totalSeconds)}",
+                            subtitle = "Timestamps follow the real runtime of your video. Tap a cut to jump the monitor to its in-point."
+                        )
+
+                        StudioCard {
+                            StudioInfoRow(
+                                icon = Icons.Default.GraphicEq,
+                                label = "BGM recommendation",
+                                value = activeProject.bgmRecommendation,
+                                accent = AuraCyan
+                            )
+                            StudioDivider()
+                            StudioInfoRow(
+                                icon = Icons.Default.AspectRatio,
+                                label = "Format & reframe",
+                                value = "${format.menuLabel} — ${activeProject.capCutTemplateAdvice}",
+                                accent = GoldLegendary
+                            )
+                        }
+
+                        if (cuts.isEmpty()) {
+                            StudioEmptyBlock(
+                                icon = Icons.Default.ContentCut,
+                                title = "No cut markers yet",
+                                message = "Once the analysis finishes, every cut gets a timestamp, speed note and transition suggestion here."
+                            )
+                        } else {
+                            cuts.forEachIndexed { index, marker ->
+                                CapCutCutCard(
+                                    marker = marker,
+                                    isLive = index == activeCutIndex,
+                                    onJump = { start ->
+                                        studioViewModel.jumpToCut(start)
+                                        Toast.makeText(
+                                            context,
+                                            "Monitor jumped to ${formatTimecode(start)}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    else -> Unit
+                }
+            }
+        }
+
+        // ==========================================================
+        // STICKY ACTION BAR — real buttons, rounded rectangles, one line
+        // ==========================================================
+        StudioBottomBar {
+            if (activeTab == 0) {
+                if (isEditingScript) {
+                    StudioTextButton(
+                        text = "Cancel",
+                        onClick = {
+                            draftScript = narration
+                            isEditingScript = false
+                        }
+                    )
+                    StudioPrimaryButton(
+                        text = "Save changes",
+                        icon = Icons.Default.Save,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            studioViewModel.updateScriptContent(draftScript)
+                            isEditingScript = false
+                            Toast.makeText(context, "Script saved", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                } else {
+                    StudioOutlineButton(
+                        text = "Edit script",
+                        icon = Icons.Default.Edit,
+                        modifier = Modifier.weight(1f),
+                        enabled = script != null,
+                        onClick = { isEditingScript = true }
+                    )
+                    StudioPrimaryButton(
+                        text = "Copy script",
+                        icon = Icons.Default.ContentCopy,
+                        modifier = Modifier.weight(1f),
+                        enabled = narration.isNotBlank(),
+                        onClick = {
+                            context.copyToClipboard("AniRecap script", narration)
+                            Toast.makeText(context, "Script copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            } else {
+                StudioSecondaryButton(
+                    text = "Copy markers",
+                    icon = Icons.Default.List,
+                    modifier = Modifier.weight(1f),
+                    enabled = cuts.isNotEmpty(),
+                    onClick = {
+                        context.copyToClipboard("CapCut markers", buildMarkerList(activeProject, format))
+                        Toast.makeText(context, "Marker list copied", Toast.LENGTH_SHORT).show()
+                    }
+                )
+                StudioPrimaryButton(
+                    text = "Copy full guide",
+                    icon = Icons.Default.ContentCopy,
+                    modifier = Modifier.weight(1f),
+                    enabled = cuts.isNotEmpty(),
+                    onClick = {
+                        context.copyToClipboard("CapCut guide", buildFullGuide(activeProject, format))
+                        Toast.makeText(context, "Full CapCut guide copied", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
+    }
+}
+
+// ==========================================================================
+// HEADER FORMAT DROPDOWN
+// ==========================================================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FormatSelector(
+    selected: StudioFormat,
+    onSelect: (StudioFormat) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        onClick = { expanded = true },
+        shape = RoundedCornerShape(StudioStyle.innerRadius),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.testTag("studio_format_selector")
     ) {
-        // Top Header
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(horizontalAlignment = Alignment.End) {
+                StudioKicker("Format")
+                Text(
+                    text = selected.shortLabel,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Choose export format",
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(20.dp)
+            )
+        }
+    }
+
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(StudioStyle.innerRadius)
+    ) {
+        StudioFormat.entries.forEach { option ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = option.menuLabel,
+                            fontSize = 13.sp,
+                            fontWeight = if (option == selected) FontWeight.Bold else FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = option.hint,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                trailingIcon = {
+                    if (option == selected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = CrimsonRedBright,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                },
+                onClick = {
+                    onSelect(option)
+                    expanded = false
+                }
+            )
+        }
+    }
+}
+
+// ==========================================================================
+// MONITOR PREVIEW CARD
+// ==========================================================================
+@Composable
+private fun MonitorPreviewCard(
+    project: RecapProject,
+    thumbnail: Bitmap?,
+    format: StudioFormat,
+    isPlaying: Boolean,
+    playheadSeconds: Float,
+    totalSeconds: Int,
+    playheadFrame: Int,
+    inCutRange: Boolean,
+    onTogglePlay: () -> Unit,
+    onSeek: (Float) -> Unit
+) {
+    val stageShape = RoundedCornerShape(StudioStyle.innerRadius)
+
+    StudioCard(
+        containerColor = Color.Black,
+        borderColor = MaterialTheme.colorScheme.outlineVariant,
+        contentPadding = 14.dp,
+        verticalSpacing = 12.dp,
+        modifier = Modifier.testTag("video_monitor_preview")
+    ) {
+        // Status strip
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "Monitor & Results",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isPlaying) ErrorRed else TextPrimary.copy(alpha = 0.4f))
                 )
-                Text(
-                    text = "${project.animeOrMovieName} ${if (project.episodes.isNotBlank()) "• ${project.episodes}" else ""} • ${project.videoFileName}",
-                    fontSize = 12.sp,
-                    color = ManaVioletLight
-                )
-                if (project.videoDurationSeconds > 0) {
-                    Text(
-                        text = "Real video duration: ${formatDuration(project.videoDurationSeconds)}",
-                        fontSize = 11.sp,
-                        color = AuraCyan
-                    )
-                }
+                Spacer(modifier = Modifier.width(6.dp))
+                StudioKicker(if (isPlaying) "Monitor · playing" else "Monitor · paused")
             }
-
-            // Aspect ratio toggle
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Surface(
-                    color = if (selectedAspect16_9) CrimsonRedBright else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.clickable { selectedAspect16_9 = true }
-                ) {
-                    Text(
-                        text = "16:9 YT",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedAspect16_9) Color.White else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
-                }
-
-                Surface(
-                    color = if (!selectedAspect16_9) CrimsonRedBright else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.clickable { selectedAspect16_9 = false }
-                ) {
-                    Text(
-                        text = "9:16 TikTok",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (!selectedAspect16_9) Color.White else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            Text(
+                text = "${format.shortLabel} · ${TIMELINE_FPS} fps",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = AuraCyan,
+                maxLines = 1
+            )
         }
 
-        // ==========================================
-        // Video monitor preview — shows REAL video info
-        // ==========================================
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.Black),
+        // Stage: real poster frame when available, otherwise a labelled placeholder
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (selectedAspect16_9) 210.dp else 290.dp)
-                .testTag("video_monitor_preview")
+                .aspectRatio(16f / 9f)
+                .clip(stageShape)
+                .background(Color(0xFF07080D))
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Top Monitor Bar: REC, Resolution, Model
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isPlaying) ErrorRed else TextTertiary)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "VIDEO MONITOR",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-
-                        Text(
-                            text = "${project.selectedModel} • Real Video",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AuraCyan
-                        )
-                    }
-
-                    // Video info display (file name + duration)
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = project.videoFileName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        if (project.videoFileSize.isNotBlank()) {
-                            Text(
-                                text = project.videoFileSize,
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                        }
-                        if (project.videoDurationSeconds > 0) {
-                            Text(
-                                text = "Duration: ${formatDuration(project.videoDurationSeconds)}",
-                                fontSize = 10.sp,
-                                color = GoldLegendary
-                            )
-                        }
-                    }
-
-                    // Center Play/Action Focus
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .size(52.dp)
-                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                            .clickable { isPlaying = !isPlaying },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Monitor Play/Pause",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-
-                    // Bottom Monitor Controls & Timecode
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Slider(
-                            value = currentSeconds.toFloat(),
-                            onValueChange = { currentSeconds = it.toInt() },
-                            valueRange = 0f..totalSeconds.toFloat().coerceAtLeast(1f),
-                            colors = SliderDefaults.colors(
-                                thumbColor = CrimsonRedBright,
-                                activeTrackColor = CrimsonRedBright,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(16.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "${formatTimecode(currentSeconds)} / ${formatTimecode(totalSeconds)}",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-
-                            Text(
-                                text = "CapCut Sync: Frame ${currentSeconds * 30}",
-                                color = GoldLegendary,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section Tabs
-        TabRow(
-            selectedTabIndex = activeTab,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = CrimsonRedBright,
-            modifier = Modifier.clip(RoundedCornerShape(10.dp))
-        ) {
-            Tab(
-                selected = activeTab == 0,
-                onClick = { activeTab = 0 },
-                text = {
-                    Text(
-                        "Recap Script",
-                        fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_script_recaps")
-            )
-
-            Tab(
-                selected = activeTab == 1,
-                onClick = { activeTab = 1 },
-                text = {
-                    Text(
-                        "CapCut Guide",
-                        fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_guide_capcut")
-            )
-        }
-
-        // ==========================================
-        // Tab 0: Recap Script (from real video analysis)
-        // ==========================================
-        if (activeTab == 0) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Script (from real video analysis)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = {
-                                if (isEditingScript) {
-                                    studioViewModel.updateScriptContent(editableScriptText)
-                                    isEditingScript = false
-                                    Toast.makeText(context, "Script saved", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    isEditingScript = true
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isEditingScript) Icons.Default.Save else Icons.Default.Edit,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isEditingScript) "Save" else "Edit", fontSize = 11.sp)
-                        }
-
-                        Button(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("AniRecap Script", editableScriptText)
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Script copied to clipboard!", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = CrimsonRedBright),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.testTag("copy_script_button")
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Copy Script", fontSize = 11.sp)
-                        }
-                    }
-                }
-
-                if (isEditingScript) {
-                    OutlinedTextField(
-                        value = editableScriptText,
-                        onValueChange = { editableScriptText = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 350.dp),
-                        shape = RoundedCornerShape(10.dp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxHeight()
+                    .aspectRatio(format.frameRatio, matchHeightConstraintsFirst = true)
+                    .background(Color.Black)
+            ) {
+                if (thumbnail != null) {
+                    Image(
+                        bitmap = thumbnail.asImageBitmap(),
+                        contentDescription = "Frame from ${project.videoFileName}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
                     )
                 } else {
-                    project.script?.let { script ->
-                        // Hook Card
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(AuraCyan.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Text(
-                                    text = "Hook:",
-                                    fontWeight = FontWeight.Bold,
-                                    color = CrimsonRedBright,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "\"${script.hook}\"",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.OndemandVideo,
+                                contentDescription = null,
+                                tint = AuraCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-
-                        // Full Narration Card
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = RoundedCornerShape(10.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = "Full Narration (generated from your uploaded video):",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AuraCyan
-                                )
-                                Text(
-                                    text = script.fullFormattedNarration,
-                                    fontSize = 13.sp,
-                                    lineHeight = 22.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // Tab 1: CapCut Guide (based on real video duration)
-        // ==========================================
-        if (activeTab == 1) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "CapCut Cut Roadmap",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "No poster frame available",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "Timestamps based on real video duration (${formatDuration(project.videoDurationSeconds)})",
+                            text = "Timecode and cut markers still track your video.",
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            lineHeight = 15.sp,
+                            color = TextPrimary.copy(alpha = 0.55f),
+                            textAlign = TextAlign.Center
                         )
                     }
-
-                    Button(
-                        onClick = {
-                            val guideText = buildString {
-                                appendLine("=== CAPCUT CUT GUIDE: ${project.animeOrMovieName} ===")
-                                appendLine("Video: ${project.videoFileName} (${formatDuration(project.videoDurationSeconds)})")
-                                appendLine()
-                                project.capCutGuide.forEach {
-                                    appendLine("[Cut #${it.cutIndex}] ${it.timeRange} (${it.durationText})")
-                                    appendLine("Scene: ${it.actionScene}")
-                                    appendLine("Speed: ${it.speedMultiplier} | Transition: ${it.transition} | SFX: ${it.sfxEffect}")
-                                    appendLine("Voiceover: ${it.voiceoverPromptKhmer}")
-                                    appendLine("CapCut Tip: ${it.capCutEditorTip}")
-                                    appendLine("----------------------------------------")
-                                }
-                            }
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("CapCut Cut Guide", guideText)
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "CapCut guide copied!", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = ManaViolet),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.testTag("copy_capcut_guide_button")
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Guide", fontSize = 11.sp)
-                    }
                 }
 
-                // BGM & Template recommendations
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // Legibility scrim + overlay strip
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = 0.55f),
+                                0.35f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.7f)
+                            )
+                        )
+                )
+
+                Text(
+                    text = project.videoFileName.ifBlank { "source_video" },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.16f))
+                        .clickable(onClick = onTogglePlay),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AuraCyan, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("BGM: ${project.bgmRecommendation}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AspectRatio, contentDescription = null, tint = GoldLegendary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Format: ${project.capCutTemplateAdvice}", fontSize = 12.sp)
-                        }
-                    }
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause monitor" else "Play monitor",
+                        tint = Color.White,
+                        modifier = Modifier.size(30.dp)
+                    )
                 }
 
-                // List of CapCut Cut markers
-                project.capCutGuide.forEach { marker ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    color = CrimsonRedBright.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = "CUT #${marker.cutIndex} • ${marker.timeRange}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = CrimsonRedBright,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-
-                                Text(
-                                    text = marker.durationText,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Text(
-                                text = "Scene: ${marker.actionScene}",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                MarkerBadge(label = "Speed: ${marker.speedMultiplier}", color = AuraCyan)
-                                MarkerBadge(label = "Effect: ${marker.transition}", color = ManaVioletLight)
-                                MarkerBadge(label = "SFX: ${marker.sfxEffect}", color = GoldLegendary)
-                            }
-
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Voiceover: \"${marker.voiceoverPromptKhmer}\"",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-
-                            Text(
-                                text = "Tip: ${marker.capCutEditorTip}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = "${totalSeconds * TIMELINE_FPS} frames · ${formatDuration(totalSeconds)} source",
+                    fontSize = 10.sp,
+                    color = TextPrimary.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                )
             }
         }
-    }
-}
 
-@Composable
-fun MarkerBadge(label: String, color: Color) {
-    Surface(
-        color = color.copy(alpha = 0.15f),
-        shape = RoundedCornerShape(4.dp)
-    ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            color = color,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+        // Timecode + CapCut sync status, justified to opposite ends
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = formatTimecode(playheadSeconds.toInt()),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = TextPrimary
+                )
+                Text(
+                    text = " / ${formatTimecode(totalSeconds)}",
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = TextPrimary.copy(alpha = 0.5f)
+                )
+            }
+
+            if (inCutRange) {
+                StudioStatusPill(text = "Synced · frame $playheadFrame", color = SuccessGreen)
+            } else {
+                StudioStatusPill(
+                    text = "Frame $playheadFrame",
+                    color = WarningAmber,
+                    icon = Icons.Default.Timer
+                )
+            }
+        }
+
+        Slider(
+            value = playheadSeconds,
+            onValueChange = onSeek,
+            valueRange = 0f..totalSeconds.coerceAtLeast(1).toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = CrimsonRedBright,
+                activeTrackColor = CrimsonRedBright,
+                inactiveTrackColor = TextPrimary.copy(alpha = 0.22f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(20.dp)
         )
     }
 }
 
+// ==========================================================================
+// SEGMENTED TABS (one accent, active pill, no heavy underline)
+// ==========================================================================
+@Composable
+private fun StudioSegmentedTabs(
+    tabs: List<StudioTabSpec>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                val selected = index == selectedIndex
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (selected) CrimsonRedBright.copy(alpha = 0.18f) else Color.Transparent
+                        )
+                        .border(
+                            width = if (selected) 1.dp else 0.dp,
+                            color = if (selected) CrimsonRedBright.copy(alpha = 0.45f) else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onSelect(index) }
+                        .padding(vertical = 10.dp, horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = null,
+                            tint = if (selected) CrimsonRedBright else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = tab.label,
+                            fontSize = 13.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================================================
+// CUT CARD — time block / action block / spec chips, content-height
+// ==========================================================================
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CapCutCutCard(
+    marker: CapCutMarker,
+    isLive: Boolean,
+    onJump: (Int) -> Unit
+) {
+    StudioCard(
+        containerColor = MaterialTheme.colorScheme.surface,
+        borderColor = if (isLive) CrimsonRedBright.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outlineVariant,
+        verticalSpacing = 10.dp,
+        onClick = { marker.startSeconds()?.let(onJump) },
+        modifier = Modifier.testTag("capcut_cut_${marker.cutIndex}")
+    ) {
+        // Block 1 — time
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = CrimsonRedBright.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(StudioStyle.chipRadius),
+                contentColor = CrimsonRedBright
+            ) {
+                Text(
+                    text = "CUT %02d".format(marker.cutIndex),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = marker.timeRange,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = marker.durationText,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // Block 2 — scene / action (Khmer)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            StudioKicker("Scene · សកម្មភាព")
+            Text(
+                text = marker.actionScene,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 26.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        // Block 3 — technical specs
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            StudioTag(label = "Speed", value = marker.speedMultiplier)
+            StudioTag(label = "Transition", value = marker.transition)
+            StudioTag(label = "SFX", value = marker.sfxEffect)
+        }
+
+        // Block 4 — voice-over line
+        StudioQuoteBlock(
+            label = "Voiceover · សម្លេងអាន",
+            text = "\"${marker.voiceoverPromptKhmer}\""
+        )
+
+        // Block 5 — editor tip
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lightbulb,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(14.dp)
+                    .padding(top = 1.dp)
+            )
+            Text(
+                text = marker.capCutEditorTip,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// ==========================================================================
+// STICKY ACTION BAR
+// ==========================================================================
+@Composable
+private fun StudioBottomBar(content: @Composable RowScope.() -> Unit) {
+    val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(16.dp, shape, clip = false)
+            .background(MaterialTheme.colorScheme.surface, shape)
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
+            .padding(horizontal = StudioStyle.screenPadding, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        content = content
+    )
+}
+
+// ==========================================================================
+// HELPERS
+// ==========================================================================
+private val FirstTimestamp = Regex("""(\d{1,2}):(\d{2})(?::(\d{2}))?""")
+
+/** "MM:SS - MM:SS" in seconds; tolerant of the formats the model returns. */
+private fun CapCutMarker.startSeconds(): Int? = FirstTimestamp.find(timeRange)?.toSeconds()
+
+private fun CapCutMarker.endSeconds(): Int? {
+    val range = timeRange.split('-', '\u2013', '\u2014')
+    if (range.size < 2) return null
+    return FirstTimestamp.find(range[1])?.toSeconds()
+}
+
+private fun MatchResult.toSeconds(): Int? {
+    val first = groupValues.getOrNull(1)?.toIntOrNull() ?: return null
+    val second = groupValues.getOrNull(2)?.toIntOrNull() ?: return null
+    val third = groupValues.getOrNull(3)?.toIntOrNull()
+    // "MM:SS" when there are two parts, "HH:MM:SS" when there are three.
+    return if (third != null) first * 3600 + second * 60 + third else first * 60 + second
+}
+
+private fun String.wordCount(): Int = split(Regex("\\s+")).count { it.isNotBlank() }
+
+private fun Context.copyToClipboard(label: String, text: String) {
+    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+private fun buildMarkerList(project: RecapProject, format: StudioFormat): String =
+    buildString {
+        appendLine("# CapCut markers · ${project.animeOrMovieName} · ${format.shortLabel}")
+        project.capCutGuide.forEach { marker ->
+            appendLine("${marker.timeRange}  cut ${marker.cutIndex}  ${marker.speedMultiplier}  ${marker.transition}  ${marker.sfxEffect}")
+        }
+    }
+
+private fun buildFullGuide(project: RecapProject, format: StudioFormat): String =
+    buildString {
+        appendLine("CAPCUT CUT GUIDE — ${project.animeOrMovieName}")
+        if (project.episodes.isNotBlank()) appendLine("Episodes: ${project.episodes}")
+        appendLine("Source: ${project.videoFileName} (${formatDuration(project.videoDurationSeconds)}) · ${format.menuLabel}")
+        appendLine("BGM: ${project.bgmRecommendation}")
+        appendLine("Format advice: ${project.capCutTemplateAdvice}")
+        appendLine()
+        project.capCutGuide.forEach { marker ->
+            appendLine("CUT ${marker.cutIndex} · ${marker.timeRange} · ${marker.durationText}")
+            appendLine("  Scene: ${marker.actionScene}")
+            appendLine("  Speed: ${marker.speedMultiplier} | Transition: ${marker.transition} | SFX: ${marker.sfxEffect}")
+            appendLine("  Voiceover: ${marker.voiceoverPromptKhmer}")
+            appendLine("  Tip: ${marker.capCutEditorTip}")
+            appendLine()
+        }
+    }
+
 private fun formatDuration(seconds: Int): String {
+    if (seconds <= 0) return "0:00"
     val min = seconds / 60
     val sec = seconds % 60
-    return String.format("%d:%02d", min, sec)
+    return "%d:%02d".format(min, sec)
 }
 
 private fun formatTimecode(seconds: Int): String {
     val min = seconds / 60
     val sec = seconds % 60
-    return String.format("%02d:%02d", min, sec)
+    return "%02d:%02d".format(min, sec)
 }

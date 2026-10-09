@@ -27,6 +27,8 @@ import com.example.data.ApiKeyEntry
 import com.example.data.AppLanguage
 import com.example.data.AppSettings
 import com.example.data.AppThemeMode
+import com.example.ui.components.StudioKicker
+import com.example.ui.components.StudioStyle
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,19 +60,22 @@ fun SettingsPage(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+            .padding(StudioStyle.screenPadding)
+            .padding(top = 18.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(StudioStyle.sectionGap)
     ) {
-        // Top Header
-        Column {
+        // Same header rhythm as the other studio pages.
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            StudioKicker("Page 3 · Preferences")
             Text(
-                text = "Settings (ការកំណត់)",
+                text = "ការកំណត់ (Settings)",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
+                lineHeight = 30.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "API Keys, OpenRouter, Themes, Language & Cache Management",
+                text = "API keys, OpenRouter, theme, language & cache",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

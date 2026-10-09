@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.media.MediaMetadataRetriever
 import androidx.lifecycle.AndroidViewModel
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class StudioNavScreen {
     data object HomeUpload : StudioNavScreen()
@@ -58,10 +60,15 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
     private val _activeProject = MutableStateFlow<RecapProject?>(null)
     val activeProject: StateFlow<RecapProject?> = _activeProject.asStateFlow()
 
-    // Video monitor playback state
+    // Video monitor playback state. Kept here (not in the composable) so the
+    // playhead and the poster frame survive tab switches and re-navigation.
     val isMonitorPlaying = MutableStateFlow(false)
-    val monitorCurrentSeconds = MutableStateFlow(0)
+    val monitorPositionSeconds = MutableStateFlow(0f)
     val monitorTotalSeconds = MutableStateFlow(0)
+
+    // Real poster frame pulled from the uploaded file, shown inside the monitor.
+    private val _videoThumbnail = MutableStateFlow<Bitmap?>(null)
+    val videoThumbnail: StateFlow<Bitmap?> = _videoThumbnail.asStateFlow()
 
     fun navigateTo(screen: StudioNavScreen) {
         _currentScreen.value = screen
@@ -76,14 +83,37 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
         videoFileName.value = name
         videoFileSize.value = sizeStr
         _errorMessage.value = null
+        monitorPositionSeconds.value = 0f
+        isMonitorPlaying.value = false
 
-        // Extract real video duration from the uploaded file
+        // Extract real video duration + a poster frame from the uploaded file
         viewModelScope.launch {
             val duration = extractVideoDuration(uri)
             videoDurationSeconds.value = duration
             monitorTotalSeconds.value = duration
+            _videoThumbnail.value = extractPosterFrame(uri, duration)
         }
     }
+
+    /**
+     * Grabs one decoded frame ~8% into the video so the monitor shows a real
+     * thumbnail instead of an empty black box.
+     */
+    private suspend fun extractPosterFrame(uri: Uri, durationSeconds: Int): Bitmap? =
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(getApplication<Application>().applicationContext, uri)
+                // ~8% into the clip (seconds * 80 == 8% of the runtime in ms)
+                val seekMs = (durationSeconds.coerceAtLeast(2) * 80L).coerceAtLeast(500L)
+                val frame = retriever.getFrameAtTime(seekMs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                retriever.release()
+                frame
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        }
 
     private suspend fun extractVideoDuration(uri: Uri): Int {
         return withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -169,7 +199,8 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
                 )
 
                 _activeProject.value = project
-                monitorTotalSeconds.value = videoDurationSeconds.value
+                resetMonitor(videoDurationSeconds.value)
+                _videoThumbnail.value = extractPosterFrame(uri, videoDurationSeconds.value)
 
                 // Jump to Page 2 directly after analysis
                 _currentScreen.value = StudioNavScreen.Page2Preview
@@ -191,11 +222,29 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
         )
     }
 
-    fun seekMonitorTo(seconds: Int) {
-        monitorCurrentSeconds.value = seconds.coerceIn(0, monitorTotalSeconds.value.coerceAtLeast(1))
+    fun seekMonitorTo(seconds: Float) {
+        val limit = monitorTotalSeconds.value.coerceAtLeast(1)
+        monitorPositionSeconds.value = seconds.coerceIn(0f, limit.toFloat())
     }
 
     fun toggleMonitorPlay() {
         isMonitorPlaying.value = !isMonitorPlaying.value
+    }
+
+    fun stopMonitor() {
+        isMonitorPlaying.value = false
+    }
+
+    /** Resets the playhead when a brand new recap is generated. */
+    fun resetMonitor(totalSeconds: Int) {
+        monitorTotalSeconds.value = totalSeconds
+        monitorPositionSeconds.value = 0f
+        isMonitorPlaying.value = false
+    }
+
+    /** Jump the monitor to a CapCut marker's in-point (seconds). */
+    fun jumpToCut(startSeconds: Int) {
+        seekMonitorTo(startSeconds.toFloat())
+        isMonitorPlaying.value = false
     }
 }
