@@ -91,6 +91,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.CapCutTimecode
 import com.example.model.CapCutMarker
 import com.example.model.RecapProject
 import com.example.ui.AniRecapStudioViewModel
@@ -977,24 +978,10 @@ private fun StudioBottomBar(content: @Composable RowScope.() -> Unit) {
 // ==========================================================================
 // HELPERS
 // ==========================================================================
-private val FirstTimestamp = Regex("""(\d{1,2}):(\d{2})(?::(\d{2}))?""")
+/** Delegates to the tested parser in the data layer. */
+private fun CapCutMarker.startSeconds(): Int? = CapCutTimecode.startSeconds(timeRange)
 
-/** "MM:SS - MM:SS" in seconds; tolerant of the formats the model returns. */
-private fun CapCutMarker.startSeconds(): Int? = FirstTimestamp.find(timeRange)?.toSeconds()
-
-private fun CapCutMarker.endSeconds(): Int? {
-    val range = timeRange.split('-', '\u2013', '\u2014')
-    if (range.size < 2) return null
-    return FirstTimestamp.find(range[1])?.toSeconds()
-}
-
-private fun MatchResult.toSeconds(): Int? {
-    val first = groupValues.getOrNull(1)?.toIntOrNull() ?: return null
-    val second = groupValues.getOrNull(2)?.toIntOrNull() ?: return null
-    val third = groupValues.getOrNull(3)?.toIntOrNull()
-    // "MM:SS" when there are two parts, "HH:MM:SS" when there are three.
-    return if (third != null) first * 3600 + second * 60 + third else first * 60 + second
-}
+private fun CapCutMarker.endSeconds(): Int? = CapCutTimecode.endSeconds(timeRange)
 
 private fun String.wordCount(): Int = split(Regex("\\s+")).count { it.isNotBlank() }
 

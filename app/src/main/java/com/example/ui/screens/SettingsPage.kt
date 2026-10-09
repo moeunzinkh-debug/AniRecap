@@ -532,8 +532,12 @@ fun SettingsPage(
             lastCleanup?.let { result ->
                 Text(
                     text = if (result.filesDeleted > 0) {
-                        "បានសម្អាតរួចរាល់ · freed ${formatBytes(result.bytesFreed)} · ${result.filesDeleted} files" +
-                            if (result.entriesFailed > 0) " · ${result.entriesFailed} entries were busy" else ""
+                        val busy = if (result.entriesFailed > 0) {
+                            " · ${result.entriesFailed} entries were busy"
+                        } else {
+                            ""
+                        }
+                        "បានសម្អាតរួចរាល់ · freed ${formatBytes(result.bytesFreed)} · ${result.filesDeleted} files$busy"
                     } else {
                         "Nothing was removed — the cache folders are already empty"
                     },
