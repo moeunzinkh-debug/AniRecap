@@ -1,0 +1,118 @@
+name: Build Debug APK
+
+# Runs on pull requests (and manually) and builds the debug APK with
+# ./gradlew assembleDebug, then uploads it as a workflow artifact.
+#
+# Toolchain (verified against official release notes):
+#   AGP 9.1.1  -> Gradle >= 9.3.1 (wrapper: 9.3.1), Build Tools 36.0.0, JDK 17+
+#   compileSdk 36.1 (Android 16 QPR2) -> platform package "platforms;android-36.1"
+#   Robolectric 4.16.1 (SDK 36) -> tests must run on JDK 21
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-debug-apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-36.1 build-tools;36.0.0"
+
+      # app/build.gradle.kts signs the debug build with ${rootDir}/debug.keystore
+      # (storepass/keypass "android", alias "androiddebugkey"). The file is
+      # gitignored, so CI must generate it before assembleDebug.
+      - name: Generate debug keystore
+        run: |
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Cache Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.gradle/jdks
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'build.gradle.kts', 'app/build.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace --console=plain
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-36.1 build-tools;36.0.0"
+
+      - name: Cache Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.gradle/jdks
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'build.gradle.kts', 'app/build.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace --console=plain
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 7
