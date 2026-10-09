@@ -1,0 +1,6 @@
+{
+  "name": "AniRecap",
+  "description": "AI-powered Anime & Movie Recap Studio with Gemini 3.5-3.8 models, Master Khmer Narration Generator, Video Monitor, and CapCut Cut Guides.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
