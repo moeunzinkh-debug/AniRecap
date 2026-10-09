@@ -32,7 +32,7 @@ data class RecapProject(
     val episodes: String,
     val sourceLanguage: String = "Auto Detect",
     val targetLanguage: String = "Khmer & English",
-    val selectedModel: String = "Gemini 3.8",
+    val selectedModel: String = "Gemini 2.5 Flash",
     val videoUri: String? = null,
     val videoFileName: String = "",
     val videoFileSize: String = "",

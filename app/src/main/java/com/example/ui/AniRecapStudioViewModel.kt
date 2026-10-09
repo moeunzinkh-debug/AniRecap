@@ -43,7 +43,7 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
     val episodes = MutableStateFlow("")
     val sourceLanguage = MutableStateFlow("Auto Detect")
     val targetLanguage = MutableStateFlow("Khmer & English target")
-    val selectedModel = MutableStateFlow("Gemini 3.8")
+    val selectedModel = MutableStateFlow("Gemini 2.5 Flash")
 
     // Validation & Error state
     private val _errorMessage = MutableStateFlow<String?>(null)
@@ -82,6 +82,8 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
         videoUri.value = uri
         videoFileName.value = name
         videoFileSize.value = sizeStr
+        videoDurationSeconds.value = 0
+        _videoThumbnail.value = null
         _errorMessage.value = null
         monitorPositionSeconds.value = 0f
         isMonitorPlaying.value = false
@@ -154,59 +156,63 @@ class AniRecapStudioViewModel(application: Application) : AndroidViewModel(appli
         }
 
         val uri = videoUri.value ?: return
+        val title = animeOrMovieName.value.trim()
+        val episodeRange = episodes.value.trim()
+        val sourceLang = sourceLanguage.value
+        val targetLang = targetLanguage.value
+        val model = selectedModel.value
+        val fileName = videoFileName.value
+        val fileSize = videoFileSize.value
 
         viewModelScope.launch {
             _isAnalyzing.value = true
             _errorMessage.value = null
+            _analysisProgressMessage.value = "1/5: Reading the selected video..."
 
             try {
-                _analysisProgressMessage.value = "1/5: Reading uploaded video file..."
-                kotlinx.coroutines.delay(400)
-
-                _analysisProgressMessage.value = "2/5: Uploading video to Gemini AI for analysis..."
-
-                _analysisProgressMessage.value = "3/5: Analyzing video scenes, dialogue & story with ${selectedModel.value}..."
-
-                _analysisProgressMessage.value = "4/5: Generating Khmer recap script from real video content..."
-
-                _analysisProgressMessage.value = "5/5: Creating CapCut cut markers based on actual video timeline..."
+                var durationSeconds = videoDurationSeconds.value
+                if (durationSeconds <= 0) {
+                    durationSeconds = extractVideoDuration(uri)
+                    videoDurationSeconds.value = durationSeconds
+                }
 
                 val (generatedScript, capCutMarkers) = RecapGenerationService.analyzeAndGenerateRecap(
                     context = getApplication<Application>().applicationContext,
                     videoUri = uri,
-                    animeName = animeOrMovieName.value.trim(),
-                    episodes = episodes.value.trim(),
-                    sourceLang = sourceLanguage.value,
-                    targetLang = targetLanguage.value,
-                    modelName = selectedModel.value,
-                    videoFileName = videoFileName.value,
-                    videoDurationSeconds = videoDurationSeconds.value
+                    animeName = title,
+                    episodes = episodeRange,
+                    sourceLang = sourceLang,
+                    targetLang = targetLang,
+                    modelName = model,
+                    videoFileName = fileName,
+                    videoDurationSeconds = durationSeconds,
+                    onProgress = { message -> _analysisProgressMessage.value = message }
                 )
 
                 val project = RecapProject(
                     id = "proj_${System.currentTimeMillis()}",
-                    animeOrMovieName = animeOrMovieName.value.trim(),
-                    episodes = episodes.value.trim(),
-                    sourceLanguage = sourceLanguage.value,
-                    targetLanguage = targetLanguage.value,
-                    selectedModel = selectedModel.value,
+                    animeOrMovieName = title,
+                    episodes = episodeRange,
+                    sourceLanguage = sourceLang,
+                    targetLanguage = targetLang,
+                    selectedModel = model,
                     videoUri = uri.toString(),
-                    videoFileName = videoFileName.value,
-                    videoFileSize = videoFileSize.value,
-                    videoDurationSeconds = videoDurationSeconds.value,
+                    videoFileName = fileName,
+                    videoFileSize = fileSize,
+                    videoDurationSeconds = durationSeconds,
                     script = generatedScript,
                     capCutGuide = capCutMarkers
                 )
 
                 _activeProject.value = project
-                resetMonitor(videoDurationSeconds.value)
-                _videoThumbnail.value = extractPosterFrame(uri, videoDurationSeconds.value)
+                resetMonitor(durationSeconds)
+                _videoThumbnail.value = extractPosterFrame(uri, durationSeconds)
 
                 // Jump to Page 2 directly after analysis
                 _currentScreen.value = StudioNavScreen.Page2Preview
             } catch (e: Exception) {
                 e.printStackTrace()
-                _errorMessage.value = "Analysis failed: ${e.message ?: "Unknown error"}. Please check your API key in Settings."
+                _errorMessage.value = "Analysis failed: ${e.message ?: "Unknown error"}"
             } finally {
                 _isAnalyzing.value = false
                 _analysisProgressMessage.value = ""

@@ -1,14 +1,16 @@
 package com.example.data
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.example.model.CapCutMarker
 import com.example.model.GeneratedRecapScript
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -33,7 +35,8 @@ object RecapGenerationService {
         .build()
 
     private const val GEMINI_BASE = "https://generativelanguage.googleapis.com"
-    private const val MODEL_ENDPOINT = "gemini-2.5-flash"
+    private const val FILE_PROCESSING_MAX_ATTEMPTS = 90
+    private const val FILE_PROCESSING_POLL_INTERVAL_MS = 2_000L
 
     /**
      * Analyze a real uploaded video and generate a recap script + CapCut guide.
@@ -57,148 +60,234 @@ object RecapGenerationService {
         targetLang: String,
         modelName: String,
         videoFileName: String,
-        videoDurationSeconds: Int
+        videoDurationSeconds: Int,
+        onProgress: (String) -> Unit = {}
     ): Pair<GeneratedRecapScript, List<CapCutMarker>> = withContext(Dispatchers.IO) {
-        val apiKey = AppSettings.getEffectiveApiKey()
+        val apiKey = AppSettings.getGeminiApiKey()
         if (apiKey.isBlank()) {
             throw IllegalStateException(
-                "No Gemini API key configured. Please add your API key in Settings."
+                "Gemini API key is missing. Add a Google Gemini API key in Settings; an OpenRouter key cannot upload through Gemini Files API."
             )
         }
 
-        // Step 1: Copy video from content URI to a temp file
-        val tempVideoFile = copyUriToTempFile(context, videoUri, videoFileName)
+        onProgress("1/5: Reading the selected video...")
+        val displayName = resolveDisplayName(context, videoUri, videoFileName)
+        val mimeType = resolveVideoMimeType(context, videoUri, displayName)
+        val tempVideoFile = copyUriToTempFile(context, videoUri)
+        var uploadedFileUri: String? = null
 
         try {
-            // Step 2: Upload video to Gemini File API
-            val fileUri = uploadVideoToGemini(tempVideoFile, apiKey)
+            val effectiveDurationSeconds = videoDurationSeconds.takeIf { it > 0 }
+                ?: readVideoDurationSeconds(tempVideoFile)
 
-            // Step 3: Wait for the file to be processed (ACTIVE state)
+            onProgress("2/5: Uploading video to Gemini...")
+            val fileUri = uploadVideoToGemini(
+                videoFile = tempVideoFile,
+                displayName = displayName,
+                mimeType = mimeType,
+                apiKey = apiKey
+            )
+            uploadedFileUri = fileUri
+
+            onProgress("3/5: Waiting for Gemini to process the video...")
             waitForFileActive(fileUri, apiKey)
 
-            // Step 4: Generate recap from the real video
+            onProgress("4/5: Analyzing the video and writing the recap...")
             val aiResponse = callGeminiWithVideo(
                 fileUri = fileUri,
+                mimeType = mimeType,
                 animeName = animeName,
                 episodes = episodes,
                 sourceLang = sourceLang,
                 targetLang = targetLang,
                 modelName = modelName,
-                videoDurationSeconds = videoDurationSeconds,
+                videoDurationSeconds = effectiveDurationSeconds,
                 apiKey = apiKey
             )
 
-            // Step 5: Parse the AI response into structured data
+            onProgress("5/5: Preparing the recap and CapCut guide...")
             val script = parseAiResponseToScript(aiResponse, animeName, episodes)
-            val capCutGuide = parseAiResponseToCapCutGuide(aiResponse, videoDurationSeconds, animeName)
-
-            // Clean up: delete the uploaded file from Gemini
-            deleteGeminiFile(fileUri, apiKey)
-
-            return@withContext Pair(script, capCutGuide)
+            val capCutGuide = parseAiResponseToCapCutGuide(
+                aiText = aiResponse,
+                videoDurationSeconds = effectiveDurationSeconds,
+                animeName = animeName
+            )
+            Pair(script, capCutGuide)
         } finally {
-            // Always clean up the temp file
-            try { tempVideoFile.delete() } catch (_: Exception) {}
+            // Clean up the remote Gemini file even when analysis fails, then remove the local copy.
+            uploadedFileUri?.let { deleteGeminiFile(it, apiKey) }
+            runCatching { tempVideoFile.delete() }
         }
     }
 
     // ==========================================
     // Step 1: Copy content URI to temp file
     // ==========================================
-    private fun copyUriToTempFile(context: Context, uri: Uri, fileName: String): File {
-        val safeName = fileName.ifBlank { "uploaded_video.mp4" }
-        val tempFile = File(context.cacheDir, "anirecap_upload_$safeName")
-
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(tempFile).use { output ->
-                input.copyTo(output)
+    private fun copyUriToTempFile(context: Context, uri: Uri): File {
+        val tempFile = File.createTempFile("anirecap_upload_", ".tmp", context.cacheDir)
+        try {
+            val input = context.contentResolver.openInputStream(uri)
+                ?: throw IllegalStateException("Could not read the selected video file.")
+            input.use { source ->
+                FileOutputStream(tempFile).use { output -> source.copyTo(output) }
             }
-        } ?: throw IllegalStateException("Could not read the selected video file.")
+            if (tempFile.length() <= 0L) {
+                throw IllegalStateException("The selected video is empty or could not be copied.")
+            }
+            return tempFile
+        } catch (error: Exception) {
+            tempFile.delete()
+            throw error
+        }
+    }
 
-        return tempFile
+    private fun resolveDisplayName(context: Context, uri: Uri, fallback: String): String {
+        val providerName = runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+        return providerName?.takeIf { it.isNotBlank() }
+            ?: fallback.takeIf { it.isNotBlank() }
+            ?: "uploaded_video.mp4"
+    }
+
+    private fun resolveVideoMimeType(context: Context, uri: Uri, fileName: String): String {
+        val providerMimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+            ?.substringBefore(';')
+            ?.lowercase()
+            ?.takeIf { it.startsWith("video/") && !it.contains('*') }
+        if (providerMimeType != null) return providerMimeType
+
+        val extension = fileName.substringAfterLast('.', "").lowercase()
+        return when (extension) {
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "webm" -> "video/webm"
+            "mpeg", "mpg" -> "video/mpeg"
+            "3gp" -> "video/3gpp"
+            "wmv" -> "video/x-ms-wmv"
+            "flv" -> "video/x-flv"
+            else -> "video/mp4"
+        }
+    }
+
+    private fun readVideoDurationSeconds(file: File): Int {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            (durationMs / 1_000L).toInt()
+        } catch (_: Exception) {
+            0
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     // ==========================================
     // Step 2: Upload video to Gemini File API
     // ==========================================
-    private fun uploadVideoToGemini(videoFile: File, apiKey: String): String {
-        val mimeType = when (videoFile.extension.lowercase()) {
-            "mp4" -> "video/mp4"
-            "mkv" -> "video/x-matroska"
-            "avi" -> "video/x-msvideo"
-            "mov" -> "video/quicktime"
-            "webm" -> "video/webm"
-            else -> "video/mp4"
-        }
+    private fun uploadVideoToGemini(
+        videoFile: File,
+        displayName: String,
+        mimeType: String,
+        apiKey: String
+    ): String {
+        // Gemini Files API uses a resumable two-step upload. The metadata must be
+        // wrapped in the `file` resource; the response provides a one-time upload URL.
+        val metadataBody = JSONObject().apply {
+            put("file", JSONObject().apply { put("display_name", displayName) })
+        }.toString().toRequestBody("application/json".toMediaType())
 
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "metadata",
-                null,
-                JSONObject().apply {
-                    put("display_name", videoFile.name)
-                }.toString().toRequestBody("application/json".toMediaType())
-            )
-            .addFormDataPart(
-                "file",
-                videoFile.name,
-                videoFile.asRequestBody(mimeType.toMediaType())
-            )
+        val startRequest = Request.Builder()
+            .url(apiUrl("/upload/v1beta/files", apiKey))
+            .header("X-Goog-Upload-Protocol", "resumable")
+            .header("X-Goog-Upload-Command", "start")
+            .header("X-Goog-Upload-Header-Content-Length", videoFile.length().toString())
+            .header("X-Goog-Upload-Header-Content-Type", mimeType)
+            .post(metadataBody)
             .build()
 
-        val request = Request.Builder()
-            .url("$GEMINI_BASE/upload/v1beta/files?key=$apiKey")
-            .post(requestBody)
-            .build()
-
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string()
-
-        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-            throw Exception("Video upload failed (HTTP ${response.code}): $responseBody")
+        val uploadUrl = client.newCall(startRequest).execute().use { response ->
+            val responseBody = response.body?.string()
+            if (!response.isSuccessful) {
+                throw Exception(httpError("Gemini upload initialization failed", response.code, responseBody))
+            }
+            response.header("X-Goog-Upload-URL")
+                ?.takeIf { it.isNotBlank() }
+                ?: throw Exception("Gemini upload initialization failed: the server did not return an upload URL.")
         }
 
-        val json = JSONObject(responseBody)
-        val fileObj = json.optJSONObject("file") ?: throw Exception("Invalid upload response: no file object")
-        return fileObj.getString("uri")
+        val uploadRequest = Request.Builder()
+            .url(uploadUrl)
+            .header("X-Goog-Upload-Offset", "0")
+            .header("X-Goog-Upload-Command", "upload, finalize")
+            .put(videoFile.asRequestBody(mimeType.toMediaType()))
+            .build()
+
+        val responseBody = client.newCall(uploadRequest).execute().use { response ->
+            val body = response.body?.string()
+            if (!response.isSuccessful || body.isNullOrBlank()) {
+                throw Exception(httpError("Video upload failed", response.code, body))
+            }
+            body
+        }
+
+        val fileObject = JSONObject(responseBody).optJSONObject("file")
+            ?: throw Exception("Gemini uploaded the video but returned no file details.")
+        return fileObject.optString("uri").takeIf { it.isNotBlank() }
+            ?: throw Exception("Gemini uploaded the video but returned no file URI.")
     }
 
     // ==========================================
     // Step 3: Poll until file is ACTIVE
     // ==========================================
     private suspend fun waitForFileActive(fileUri: String, apiKey: String) {
-        // fileUri looks like: https://generativelanguage.googleapis.com/v1beta/files/abc123
-        val fileName = fileUri.substringAfterLast("/")
-        val maxAttempts = 30
-        var attempt = 0
+        val fileName = fileUri.substringAfterLast('/').takeIf { it.isNotBlank() }
+            ?: throw Exception("Gemini returned an invalid video file URI.")
+        val request = Request.Builder()
+            .url(apiUrl("/v1beta/files/$fileName", apiKey))
+            .get()
+            .build()
 
-        while (attempt < maxAttempts) {
-            val request = Request.Builder()
-                .url("$GEMINI_BASE/v1beta/files/$fileName?key=$apiKey")
-                .get()
-                .build()
-
-            val response = client.newCall(request).execute()
-            val body = response.body?.string()
-
-            if (response.isSuccessful && !body.isNullOrBlank()) {
-                val state = JSONObject(body).optString("state", "")
-                when (state) {
-                    "ACTIVE" -> return
-                    "FAILED" -> throw Exception("Video processing failed on Gemini servers.")
-                    else -> {
-                        // PROCESSING — wait and retry
-                        delay(2000)
-                        attempt++
+        repeat(FILE_PROCESSING_MAX_ATTEMPTS) { attempt ->
+            val state = client.newCall(request).execute().use { response ->
+                val body = response.body?.string()
+                if (!response.isSuccessful) {
+                    if (response.code in setOf(408, 429, 500, 502, 503, 504)) {
+                        null // transient response; retry after a short delay
+                    } else {
+                        throw Exception(httpError("Could not check Gemini video status", response.code, body))
                     }
+                } else if (body.isNullOrBlank()) {
+                    "PROCESSING"
+                } else {
+                    JSONObject(body).optString("state", "PROCESSING")
                 }
-            } else {
-                delay(2000)
-                attempt++
+            }
+
+            when (state) {
+                "ACTIVE" -> return
+                "FAILED" -> throw Exception("Gemini could not process this video. Try an MP4 or another supported video format.")
+            }
+            if (attempt < FILE_PROCESSING_MAX_ATTEMPTS - 1) {
+                delay(FILE_PROCESSING_POLL_INTERVAL_MS)
             }
         }
-        throw Exception("Timed out waiting for video processing. Please try again.")
+        throw Exception("Gemini is still processing the video after 3 minutes. Please try again with a shorter video.")
     }
 
     // ==========================================
@@ -206,6 +295,7 @@ object RecapGenerationService {
     // ==========================================
     private fun callGeminiWithVideo(
         fileUri: String,
+        mimeType: String,
         animeName: String,
         episodes: String,
         sourceLang: String,
@@ -215,41 +305,31 @@ object RecapGenerationService {
         apiKey: String
     ): String {
         val durationFormatted = formatDuration(videoDurationSeconds)
-
+        val outputLanguageInstructions = when (targetLang.trim().lowercase()) {
+            "english" -> "Write the complete narration and voiceover lines in natural English."
+            "khmer" -> "Write the complete narration and voiceover lines in natural Khmer."
+            else -> "Write the narration primarily in natural Khmer; retain accurate English names and terms where helpful."
+        }
         val prompt = """
-            You are a professional Anime & Movie Recap Script writer. You have been given a REAL video file to analyze.
+            You are a professional anime and movie recap writer. Analyze the uploaded video itself from beginning to end.
 
-            VIDEO METADATA:
-            - Title hint: $animeName
-            - Episodes: ${episodes.ifBlank { "N/A" }}
-            - Source Language: $sourceLang
-            - Target Language: $targetLang
-            - Video Duration: $durationFormatted
+            VIDEO DETAILS:
+            - Title supplied by the user (a hint, not proof): $animeName
+            - Episodes: ${episodes.ifBlank { "Not specified" }}
+            - Spoken/source language: $sourceLang
+            - Requested output language: $targetLang
+            - Actual video duration: $durationFormatted
 
-            TASK:
-            Analyze the actual video content (scenes, dialogue, action, story) and produce:
+            MASTER RECAP RULES:
+            - Base the recap on scenes and dialogue actually visible or audible in this video. Do not invent plot, names, ranks, factions, dialogue, or events. If something is unclear, say so rather than guessing.
+            - Keep the story plot-first: roughly 80% chronological story summary and 20% concise recap commentary.
+            - Track character identity and development carefully. Keep personal rank/power level separate from guild, faction, or organization.
+            - Include a compelling hook, natural opening, setting/world, main characters, story progression, rank/power notes, factions, climax, and ending/next direction when the video supports them.
+            - $outputLanguageInstructions
+            - Create exactly five CapCut markers that cover the full video in order. Use real timestamps within 00:00 and $durationFormatted; describe the actual scene at each timestamp. Do not make up scene details.
+            - Match the voiceover lines to the corresponding scene and requested output language.
 
-            PART 1 - RECAP SCRIPT (in Khmer, following MASTER PROMPT: KHMER ANIME RECAP):
-            - HOOK: A compelling 1-2 sentence hook based on what actually happens in the video.
-            - OPENING: Start with the classic Khmer recap opening phrase, followed by what the video actually shows.
-            - WORLD: Explain the setting/world shown in the video.
-            - CHARACTER: Introduce the main character(s) seen in the video.
-            - STORY: 80% plot summary of what actually happens + 20% recap commentary.
-            - RANK/HIERARCHY: Any ranking, power levels, or hierarchy visible in the video.
-            - FACTIONS: Any groups, guilds, or factions shown.
-            - CLIMAX: The most intense moment actually shown in the video.
-            - ENDING: How the video ends and what it sets up next.
-
-            PART 2 - CAPCUT CUT GUIDE:
-            Based on the ACTUAL video duration ($durationFormatted), create 5 cut markers with:
-            - Real timestamps within the video duration
-            - Scene descriptions matching actual content
-            - Speed, transition, SFX recommendations
-            - Khmer voiceover lines matching the actual scenes
-
-            IMPORTANT: Base everything on the ACTUAL video content you see. Do not use generic templates.
-
-            Format your response as JSON:
+            Return JSON only, with this structure:
             {
               "hook": "...",
               "opening": "...",
@@ -260,68 +340,76 @@ object RecapGenerationService {
               "factions": "...",
               "climax": "...",
               "ending": "...",
-              "fullNarration": "... complete formatted Khmer narration ...",
+              "fullNarration": "Complete, natural recap narration based on the video",
               "capCutMarkers": [
                 {
                   "cutIndex": 1,
-                  "timeRange": "00:00 - 00:15",
-                  "durationText": "15 seconds",
-                  "actionScene": "...",
+                  "timeRange": "00:00 - 00:30",
+                  "durationText": "30 seconds",
+                  "actionScene": "What is actually shown in this segment",
                   "speedMultiplier": "1.0x",
-                  "transition": "...",
-                  "sfxEffect": "...",
-                  "voiceoverPromptKhmer": "...",
-                  "capCutEditorTip": "..."
+                  "transition": "Suggested transition",
+                  "sfxEffect": "Suggested sound effect",
+                  "voiceoverPromptKhmer": "Voiceover line matching this scene",
+                  "capCutEditorTip": "Practical editing note"
                 }
               ]
             }
         """.trimIndent()
 
-        val jsonPayload = JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("parts", JSONArray().apply {
-                        // Video part first
-                        put(JSONObject().apply {
-                            put("file_data", JSONObject().apply {
-                                put("file_uri", fileUri)
-                                put("mime_type", "video/mp4")
-                            })
-                        })
-                        // Text prompt second
-                        put(JSONObject().apply {
-                            put("text", prompt)
-                        })
-                    })
-                })
-            })
-            put("generationConfig", JSONObject().apply {
-                put("temperature", 0.7)
-                put("maxOutputTokens", 8192)
-            })
-        }
+        val contentParts = JSONArray()
+            .put(
+                JSONObject().put(
+                    "fileData",
+                    JSONObject()
+                        .put("fileUri", fileUri)
+                        .put("mimeType", mimeType)
+                )
+            )
+            .put(JSONObject().put("text", prompt))
+        val jsonPayload = JSONObject()
+            .put("contents", JSONArray().put(JSONObject().put("parts", contentParts)))
+            .put(
+                "generationConfig",
+                JSONObject()
+                    .put("temperature", 0.5)
+                    .put("maxOutputTokens", 8192)
+                    .put("responseMimeType", "application/json")
+            )
 
+        val modelId = resolveGeminiModelId(modelName)
         val request = Request.Builder()
-            .url("$GEMINI_BASE/v1beta/models/$MODEL_ENDPOINT:generateContent?key=$apiKey")
+            .url(apiUrl("/v1beta/models/$modelId:generateContent", apiKey))
             .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string()
-
-        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-            throw Exception("Gemini API error (HTTP ${response.code}): $responseBody")
+        val responseBody = client.newCall(request).execute().use { response ->
+            val body = response.body?.string()
+            if (!response.isSuccessful || body.isNullOrBlank()) {
+                throw Exception(httpError("Gemini recap generation failed", response.code, body))
+            }
+            body
         }
 
-        val json = JSONObject(responseBody)
-        val candidates = json.optJSONArray("candidates")
-        val text = candidates?.optJSONObject(0)
+        val responseJson = JSONObject(responseBody)
+        val candidates = responseJson.optJSONArray("candidates")
+        val parts = candidates?.optJSONObject(0)
             ?.optJSONObject("content")
             ?.optJSONArray("parts")
-            ?.optJSONObject(0)
-            ?.optString("text")
-            ?: throw Exception("Empty response from Gemini API.")
+        val text = parts?.let { candidateParts ->
+            (0 until candidateParts.length())
+                .mapNotNull { index -> candidateParts.optJSONObject(index)?.optString("text") }
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+        }.orEmpty()
 
+        if (text.isBlank()) {
+            val blockReason = responseJson.optJSONObject("promptFeedback")
+                ?.optString("blockReason")
+                ?.takeIf { it.isNotBlank() }
+            throw Exception(blockReason?.let { "Gemini could not analyze this video: $it" }
+                ?: "Gemini returned no recap text. Please try again or choose a shorter video.")
+        }
         return text
     }
 
@@ -465,6 +553,28 @@ object RecapGenerationService {
     // ==========================================
     // Helpers
     // ==========================================
+    private fun apiUrl(path: String, apiKey: String): String =
+        "$GEMINI_BASE$path".toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("key", apiKey)
+            .build()
+            .toString()
+
+    private fun resolveGeminiModelId(modelName: String): String =
+        when (modelName.trim().lowercase()) {
+            "gemini 2.5 pro", "gemini-2.5-pro" -> "gemini-2.5-pro"
+            else -> "gemini-2.5-flash"
+        }
+
+    private fun httpError(prefix: String, statusCode: Int, body: String?): String {
+        val apiMessage = runCatching {
+            JSONObject(body.orEmpty()).optJSONObject("error")?.optString("message")
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        val detail = apiMessage ?: body?.replace(Regex("\\s+"), " ")?.take(400)
+        return if (detail.isNullOrBlank()) "$prefix (HTTP $statusCode)."
+        else "$prefix (HTTP $statusCode): $detail"
+    }
+
     private fun extractJsonFromText(text: String): String? {
         // Find JSON block in the response (may be wrapped in markdown code blocks)
         val start = text.indexOf('{')
@@ -476,26 +586,31 @@ object RecapGenerationService {
     }
 
     private fun deleteGeminiFile(fileUri: String, apiKey: String) {
-        try {
-            val fileName = fileUri.substringAfterLast("/")
+        val fileName = fileUri.substringAfterLast('/').substringBefore('?')
+        if (fileName.isBlank()) return
+        runCatching {
             val request = Request.Builder()
-                .url("$GEMINI_BASE/v1beta/files/$fileName?key=$apiKey")
+                .url(apiUrl("/v1beta/files/$fileName", apiKey))
                 .delete()
                 .build()
-            client.newCall(request).execute().close()
-        } catch (_: Exception) {}
+            client.newCall(request).execute().use { }
+        }
     }
 
     private fun formatDuration(seconds: Int): String {
-        val min = seconds / 60
-        val sec = seconds % 60
-        return String.format("%02d:%02d (%d min %d sec)", min, sec, min, sec)
+        val safeSeconds = seconds.coerceAtLeast(0)
+        val minutes = safeSeconds / 60
+        val remainingSeconds = safeSeconds % 60
+        return String.format("%02d:%02d (%d min %d sec)", minutes, remainingSeconds, minutes, remainingSeconds)
     }
 
     private fun formatTime(seconds: Int): String {
-        val min = seconds / 60
-        val sec = seconds % 60
-        return String.format("%02d:%02d", min, sec)
+        val safeSeconds = seconds.coerceAtLeast(0)
+        val hours = safeSeconds / 3600
+        val minutes = (safeSeconds % 3600) / 60
+        val remainingSeconds = safeSeconds % 60
+        return if (hours > 0) String.format("%d:%02d:%02d", hours, minutes, remainingSeconds)
+        else String.format("%02d:%02d", minutes, remainingSeconds)
     }
 
     private fun defaultHook(animeName: String): String {

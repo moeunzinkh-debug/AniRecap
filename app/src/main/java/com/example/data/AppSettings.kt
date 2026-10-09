@@ -177,6 +177,19 @@ object AppSettings {
             .apply()
     }
 
+    /**
+     * Returns a Google Gemini key for Gemini Files/GenerateContent requests.
+     * OpenRouter keys use a different API and must never be sent to Google's endpoint.
+     */
+    fun getGeminiApiKey(): String {
+        val geminiKeys = _apiKeys.value.filter {
+            it.provider.equals("Google Gemini", ignoreCase = true)
+        }
+        val selectedGeminiKey = geminiKeys.firstOrNull { it.id == _activeKeyId.value }
+            ?: geminiKeys.firstOrNull()
+        return selectedGeminiKey?.key?.takeIf { it.isNotBlank() } ?: getBuildConfigKey()
+    }
+
     fun getEffectiveApiKey(): String {
         if (_useCustomProvider.value && _openRouterApiKey.value.isNotBlank()) {
             return _openRouterApiKey.value

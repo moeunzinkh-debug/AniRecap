@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -60,7 +61,23 @@ fun HomePage(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            val displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "uploaded_video.mp4"
+            val displayName = runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                    } else {
+                        null
+                    }
+                }
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: uri.lastPathSegment?.substringAfterLast('/')
+                ?: "uploaded_video.mp4"
             val sizeStr = try {
                 val sizeBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
                 formatFileSize(sizeBytes)
@@ -78,7 +95,7 @@ fun HomePage(
 
     val sourceLangOptions = listOf("Auto Detect", "Japanese", "Korean", "Chinese", "English")
     val targetLangOptions = listOf("Khmer & English target", "Khmer", "English")
-    val modelOptions = listOf("Gemini 3.8", "Gemini 3.7", "Gemini 3.6", "Gemini 3.5")
+    val modelOptions = listOf("Gemini 2.5 Flash", "Gemini 2.5 Pro")
 
     // Validation: can only analyze with a real video + name
     val canAnalyze = videoUri != null && animeOrMovieName.isNotBlank() && !isAnalyzing
@@ -311,7 +328,7 @@ fun HomePage(
             modifier = Modifier.fillMaxWidth()
         ) {
             OutlinedTextField(
-                value = "Gemini: $selectedModel",
+                value = selectedModel,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("AI Model") },
@@ -328,8 +345,8 @@ fun HomePage(
                     DropdownMenuItem(
                         text = {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                Text("Gemini $modelName", fontWeight = FontWeight.Bold)
-                                if (modelName == "3.8") {
+                                Text(modelName, fontWeight = FontWeight.Bold)
+                                if (modelName == "Gemini 2.5 Flash") {
                                     Surface(color = CrimsonRedBright.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                                         Text("RECOMMENDED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = CrimsonRedBright, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                                     }
