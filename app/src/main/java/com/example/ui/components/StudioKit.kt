@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,12 +86,13 @@ fun StudioCard(
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surface,
     borderColor: Color = MaterialTheme.colorScheme.outlineVariant,
+    cornerRadius: Dp = StudioStyle.cardRadius,
     contentPadding: Dp = StudioStyle.cardPadding,
     verticalSpacing: Dp = StudioStyle.cardGap,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val shape = RoundedCornerShape(StudioStyle.cardRadius)
+    val shape = RoundedCornerShape(cornerRadius)
     val handler: (() -> Unit)? = onClick
 
     // On tappable cards the fill is painted here (underneath `clickable`) and the
@@ -352,12 +354,13 @@ fun StudioPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    height: Dp = StudioStyle.controlHeight
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(StudioStyle.controlHeight),
+        modifier = modifier.height(height),
         shape = RoundedCornerShape(StudioStyle.innerRadius),
         elevation = null,
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
@@ -378,12 +381,13 @@ fun StudioSecondaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    height: Dp = StudioStyle.controlHeight
 ) {
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(StudioStyle.controlHeight),
+        modifier = modifier.height(height),
         shape = RoundedCornerShape(StudioStyle.innerRadius),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
         colors = ButtonDefaults.filledTonalButtonColors(
@@ -401,12 +405,13 @@ fun StudioOutlineButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    height: Dp = StudioStyle.controlHeight
 ) {
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(StudioStyle.controlHeight),
+        modifier = modifier.height(height),
         shape = RoundedCornerShape(StudioStyle.innerRadius),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
@@ -547,5 +552,195 @@ fun StudioQuoteBlock(
                 lineHeight = 26.sp
             )
         }
+    }
+}
+
+/** One option of a [StudioSegmentedControl]. */
+data class StudioSegment(val label: String, val icon: ImageVector? = null)
+
+/**
+ * Segmented control used wherever a small set of mutually exclusive options
+ * exists (script/guide tabs, language, ...). Replaces the chip clusters that
+ * wrapped text awkwardly.
+ */
+@Composable
+fun StudioSegmentedControl(
+    options: List<StudioSegment>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            options.forEachIndexed { index, option ->
+                val selected = index == selectedIndex
+                val pillShape = RoundedCornerShape(10.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(pillShape)
+                        .background(
+                            if (selected) CrimsonRedBright.copy(alpha = 0.18f) else Color.Transparent
+                        )
+                        .border(
+                            width = if (selected) 1.dp else 0.dp,
+                            color = if (selected) CrimsonRedBright.copy(alpha = 0.45f) else Color.Transparent,
+                            shape = pillShape
+                        )
+                        .clickable { onSelect(index) }
+                        .padding(vertical = 10.dp, horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (option.icon != null) {
+                            Icon(
+                                imageVector = option.icon,
+                                contentDescription = null,
+                                tint = if (selected) CrimsonRedBright else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        Text(
+                            text = option.label,
+                            fontSize = 13.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Full-width selectable row with a trailing check — theme, model, provider lists. */
+@Composable
+fun StudioChoiceRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    icon: ImageVector? = null
+) {
+    val shape = RoundedCornerShape(StudioStyle.innerRadius)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected) CrimsonRedBright.copy(alpha = 0.10f)
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) CrimsonRedBright.copy(alpha = 0.5f)
+                else MaterialTheme.colorScheme.outlineVariant,
+                shape = shape
+            )
+            .clickable(onClick = onClick)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (icon != null) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (selected) CrimsonRedBright.copy(alpha = 0.16f)
+                        else MaterialTheme.colorScheme.surface
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (selected) CrimsonRedBright else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                fontSize = StudioStyle.bodySize,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!description.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = description,
+                    fontSize = StudioStyle.metaSize,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Selected",
+                tint = CrimsonRedBright,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/** Left label / right value line, used for stats (sizes, versions, counts). */
+@Composable
+fun StudioKeyValueRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = StudioStyle.metaSize,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = value,
+            fontSize = StudioStyle.metaSize,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

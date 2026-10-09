@@ -104,6 +104,8 @@ import com.example.ui.components.StudioMetaChip
 import com.example.ui.components.StudioOutlineButton
 import com.example.ui.components.StudioPrimaryButton
 import com.example.ui.components.StudioQuoteBlock
+import com.example.ui.components.StudioSegment
+import com.example.ui.components.StudioSegmentedControl
 import com.example.ui.components.StudioSecondaryButton
 import com.example.ui.components.StudioSectionHeader
 import com.example.ui.components.StudioStatusPill
@@ -131,8 +133,6 @@ private enum class StudioFormat(
     Vertical("9:16 · TikTok / Shorts", "9:16", "Vertical crop — use CapCut Smart Auto Reframe.", 9f / 16f),
     Square("1:1 · Feed preview", "1:1", "Square safe area for feed and thumbnail tests.", 1f)
 }
-
-private data class StudioTabSpec(val label: String, val icon: ImageVector)
 
 private const val TIMELINE_FPS = 30
 
@@ -321,13 +321,14 @@ fun Page2Preview(
             // ==========================================================
             // TABS
             // ==========================================================
-            StudioSegmentedTabs(
-                tabs = listOf(
-                    StudioTabSpec("Recap Script", Icons.Default.Movie),
-                    StudioTabSpec("CapCut Guide", Icons.Default.ContentCut)
+            StudioSegmentedControl(
+                options = listOf(
+                    StudioSegment("Recap Script", Icons.Default.Movie),
+                    StudioSegment("CapCut Guide", Icons.Default.ContentCut)
                 ),
                 selectedIndex = activeTab,
-                onSelect = { activeTab = it }
+                onSelect = { activeTab = it },
+                modifier = Modifier.testTag("studio_tab_switch")
             )
 
             when (activeTab) {
@@ -826,72 +827,6 @@ private fun MonitorPreviewCard(
                 .fillMaxWidth()
                 .height(20.dp)
         )
-    }
-}
-
-// ==========================================================================
-// SEGMENTED TABS (one accent, active pill, no heavy underline)
-// ==========================================================================
-@Composable
-private fun StudioSegmentedTabs(
-    tabs: List<StudioTabSpec>,
-    selectedIndex: Int,
-    onSelect: (Int) -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            tabs.forEachIndexed { index, tab ->
-                val selected = index == selectedIndex
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (selected) CrimsonRedBright.copy(alpha = 0.18f) else Color.Transparent
-                        )
-                        .border(
-                            width = if (selected) 1.dp else 0.dp,
-                            color = if (selected) CrimsonRedBright.copy(alpha = 0.45f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        .clickable { onSelect(index) }
-                        .padding(vertical = 10.dp, horizontal = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = null,
-                            tint = if (selected) CrimsonRedBright else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = tab.label,
-                            fontSize = 13.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

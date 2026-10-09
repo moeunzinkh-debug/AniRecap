@@ -197,15 +197,6 @@ object AppSettings {
         }
     }
 
-    fun clearCache(context: Context) {
-        try {
-            context.cacheDir.deleteRecursively()
-            context.codeCacheDir.deleteRecursively()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     private fun saveApiKeysToPrefs(keys: List<ApiKeyEntry>) {
         val array = JSONArray()
         for (k in keys) {
