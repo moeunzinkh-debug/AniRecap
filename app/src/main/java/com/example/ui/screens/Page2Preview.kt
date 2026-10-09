@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -331,137 +330,133 @@ fun Page2Preview(
                 onSelect = { activeTab = it }
             )
 
-            Crossfade(targetState = activeTab, label = "studio_tab_content") { tabIndex ->
-                when (tabIndex) {
-                    // ==========================================================
-                    // TAB 0 — narration script
-                    // ==========================================================
-                    0 -> Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
-                    ) {
-                        StudioSectionHeader(
-                            kicker = "Master script",
-                            title = "សម្រាយសាច់រឿង (plot-first narration)",
-                            subtitle = if (narration.isNotBlank()) {
-                                val words = narration.wordCount()
-                                "${words} words · ~${formatDuration((words / 2.4f).roundToInt())} voice-over at 145 wpm"
-                            } else {
-                                "No narration generated for this video yet."
-                            }
-                        )
-
-                        if (script == null) {
-                            StudioEmptyBlock(
-                                icon = Icons.Default.Movie,
-                                title = "មិនទាន់មាន Script សម្រាយសាច់រឿងនៅឡើយទេ",
-                                message = "Re-run the analysis from the Upload tab to generate the Khmer recap narration.",
-                                actionLabel = "Back to Upload",
-                                onAction = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) }
-                            )
+            when (activeTab) {
+                // ==========================================================
+                // TAB 0 — narration script
+                // ==========================================================
+                0 -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
+                ) {
+                    StudioSectionHeader(
+                        kicker = "Master script",
+                        title = "សម្រាយសាច់រឿង (plot-first narration)",
+                        subtitle = if (narration.isNotBlank()) {
+                            val words = narration.wordCount()
+                            "${words} words · ~${formatDuration((words / 2.4f).roundToInt())} voice-over at 145 wpm"
                         } else {
-                            StudioCard(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                borderColor = Color.Transparent,
-                                verticalSpacing = 6.dp
-                            ) {
-                                StudioKicker("ចំណុចទាក់ទាញដំបូង · Hook", color = CrimsonRedBright)
-                                Text(
-                                    text = "\"${script.hook}\"",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = 24.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                            "No narration generated for this video yet."
+                        }
+                    )
 
-                            StudioCard {
-                                StudioKicker("Full narration · ដំណើររឿង")
-                                StudioDivider()
-                                if (isEditingScript) {
-                                    OutlinedTextField(
-                                        value = draftScript,
-                                        onValueChange = { draftScript = it },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(min = 300.dp),
-                                        shape = RoundedCornerShape(StudioStyle.innerRadius),
-                                        label = { Text("Edit the narration") },
-                                        supportingText = {
-                                            Text(
-                                                "Saved on this device only — the AI output is not overwritten.",
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    )
-                                } else {
-                                    SelectionContainer {
+                    if (script == null) {
+                        StudioEmptyBlock(
+                            icon = Icons.Default.Movie,
+                            title = "មិនទាន់មាន Script សម្រាយសាច់រឿងនៅឡើយទេ",
+                            message = "Re-run the analysis from the Upload tab to generate the Khmer recap narration.",
+                            actionLabel = "Back to Upload",
+                            onAction = { studioViewModel.navigateTo(StudioNavScreen.HomeUpload) }
+                        )
+                    } else {
+                        StudioCard(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            borderColor = Color.Transparent,
+                            verticalSpacing = 6.dp
+                        ) {
+                            StudioKicker("ចំណុចទាក់ទាញដំបូង · Hook", color = CrimsonRedBright)
+                            Text(
+                                text = "\"${script.hook}\"",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                lineHeight = 24.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        StudioCard {
+                            StudioKicker("Full narration · ដំណើររឿង")
+                            StudioDivider()
+                            if (isEditingScript) {
+                                OutlinedTextField(
+                                    value = draftScript,
+                                    onValueChange = { draftScript = it },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 300.dp),
+                                    shape = RoundedCornerShape(StudioStyle.innerRadius),
+                                    label = { Text("Edit the narration") },
+                                    supportingText = {
                                         Text(
-                                            text = narration,
-                                            fontSize = 15.sp,
-                                            lineHeight = 27.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            "Saved on this device only — the AI output is not overwritten.",
+                                            fontSize = 11.sp
                                         )
                                     }
+                                )
+                            } else {
+                                SelectionContainer {
+                                    Text(
+                                        text = narration,
+                                        fontSize = 15.sp,
+                                        lineHeight = 27.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
                         }
                     }
+                }
 
-                    // ==========================================================
-                    // TAB 1 — CapCut cut roadmap
-                    // ==========================================================
-                    1 -> Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
-                    ) {
-                        StudioSectionHeader(
-                            kicker = "CapCut editing roadmap",
-                            title = "${cuts.size} cut markers · ${formatDuration(totalSeconds)}",
-                            subtitle = "Timestamps follow the real runtime of your video. Tap a cut to jump the monitor to its in-point."
+                // ==========================================================
+                // TAB 1 — CapCut cut roadmap
+                // ==========================================================
+                1 -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(StudioStyle.cardGap)
+                ) {
+                    StudioSectionHeader(
+                        kicker = "CapCut editing roadmap",
+                        title = "${cuts.size} cut markers · ${formatDuration(totalSeconds)}",
+                        subtitle = "Timestamps follow the real runtime of your video. Tap a cut to jump the monitor to its in-point."
+                    )
+
+                    StudioCard {
+                        StudioInfoRow(
+                            icon = Icons.Default.GraphicEq,
+                            label = "BGM recommendation",
+                            value = activeProject.bgmRecommendation,
+                            accent = AuraCyan
                         )
-
-                        StudioCard {
-                            StudioInfoRow(
-                                icon = Icons.Default.GraphicEq,
-                                label = "BGM recommendation",
-                                value = activeProject.bgmRecommendation,
-                                accent = AuraCyan
-                            )
-                            StudioDivider()
-                            StudioInfoRow(
-                                icon = Icons.Default.AspectRatio,
-                                label = "Format & reframe",
-                                value = "${format.menuLabel} — ${activeProject.capCutTemplateAdvice}",
-                                accent = GoldLegendary
-                            )
-                        }
-
-                        if (cuts.isEmpty()) {
-                            StudioEmptyBlock(
-                                icon = Icons.Default.ContentCut,
-                                title = "No cut markers yet",
-                                message = "Once the analysis finishes, every cut gets a timestamp, speed note and transition suggestion here."
-                            )
-                        } else {
-                            cuts.forEachIndexed { index, marker ->
-                                CapCutCutCard(
-                                    marker = marker,
-                                    isLive = index == activeCutIndex,
-                                    onJump = { start ->
-                                        studioViewModel.jumpToCut(start)
-                                        Toast.makeText(
-                                            context,
-                                            "Monitor jumped to ${formatTimecode(start)}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                )
-                            }
-                        }
+                        StudioDivider()
+                        StudioInfoRow(
+                            icon = Icons.Default.AspectRatio,
+                            label = "Format & reframe",
+                            value = "${format.menuLabel} — ${activeProject.capCutTemplateAdvice}",
+                            accent = GoldLegendary
+                        )
                     }
 
-                    else -> Unit
+                    if (cuts.isEmpty()) {
+                        StudioEmptyBlock(
+                            icon = Icons.Default.ContentCut,
+                            title = "No cut markers yet",
+                            message = "Once the analysis finishes, every cut gets a timestamp, speed note and transition suggestion here."
+                        )
+                    } else {
+                        cuts.forEachIndexed { index, marker ->
+                            CapCutCutCard(
+                                marker = marker,
+                                isLive = index == activeCutIndex,
+                                onJump = { start ->
+                                    studioViewModel.jumpToCut(start)
+                                    Toast.makeText(
+                                        context,
+                                        "Monitor jumped to ${formatTimecode(start)}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -579,9 +574,7 @@ private fun FormatSelector(
 
     DropdownMenu(
         expanded = expanded,
-        onDismissRequest = { expanded = false },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(StudioStyle.innerRadius)
+        onDismissRequest = { expanded = false }
     ) {
         StudioFormat.entries.forEach { option ->
             DropdownMenuItem(
